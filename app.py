@@ -107,10 +107,11 @@ if uploaded_files:
     progress_area.empty()
 
     if uploaded_success:
-        st.cache_data.clear()
-        st.success("✅ Semua upload selesai. Memperbarui data...")
-        existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-        valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+        st.success("✅ Semua file berhasil diupload.")
+        with st.spinner("🔄 Memuat ulang data terbaru..."):
+            st.cache_data.clear()
+            existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+            valid_files[:] = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 
 # --- LOAD FILES (CACHED) ---
 @st.cache_data(show_spinner="📥 Memuat data dari Hugging Face...")
