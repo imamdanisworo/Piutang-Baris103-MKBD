@@ -2,13 +2,12 @@ import streamlit as st
 import pandas as pd
 import os
 from huggingface_hub import HfApi, HfFileSystem
-from huggingface_hub.utils._errors import RepositoryNotFoundError
 from io import BytesIO
 import plotly.express as px
 
 # Configuration
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
-HF_TOKEN = os.getenv("HF_TOKEN")  # Must be set in HF Spaces → Secrets
+HF_TOKEN = os.getenv("HF_TOKEN")  # Set in HF Spaces → Secrets
 api = HfApi(token=HF_TOKEN)
 fs = HfFileSystem(token=HF_TOKEN)
 
@@ -18,7 +17,7 @@ st.title("📤 Upload & Analisa Piutang Nasabah")
 # --- Ensure dataset exists ---
 try:
     api.repo_info(repo_id=REPO_ID, repo_type="dataset")
-except RepositoryNotFoundError:
+except Exception:
     api.create_repo(
         repo_id=REPO_ID,
         repo_type="dataset",
