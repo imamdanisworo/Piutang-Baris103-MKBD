@@ -1,110 +1,221 @@
-from nicegui import ui
+import streamlit as st
 import pandas as pd
+import plotly.express as px
 import re
-from huggingface_hub import HfApi, upload_file, delete_file, hf_hub_download
-from io import BytesIO
 import os
-from datetime import datetime
+from huggingface_hub import HfApi, upload_file, hf_hub_download, delete_file
+from io import BytesIO
+
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
+
+# --- FULLY REMOVE COLLAPSE BUTTON & LOCK SIDEBAR OPEN ---
+st.markdown("""
+    <style>
+    /* ✅ Completely hide the sidebar collapse toggle */
+    div[data-testid="collapsedControl"] {
+        display: none !important;
+        visibility: hidden !important;
+        position: absolute !important;
+        top: -9999px;
+    }
+
+    /* ✅ Force sidebar to stay open and fixed width */
+    section[data-testid="stSidebar"] {
+        transform: none !important;
+        visibility: visible !important;
+        width: 270px !important;
+        min-width: 270px !important;
+        max-width: 270px !important;
+        position: relative !important;
+        left: 0px !important;
+    }
+
+    /* ✅ Ensure main content aligns correctly */
+    .block-container {
+        padding-left: 3rem !important;
+        padding-right: 2rem !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- CONFIG ---
 HF_TOKEN = os.getenv("HF_TOKEN")
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
 VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
-hf_api = HfApi(token=HF_TOKEN)
 
-# --- STATE ---
-all_data = pd.DataFrame()
+st.title("📤 Upload & Analisa Piutang Nasabah")
+st.markdown("---")
 
-# --- FUNCTIONS ---
-def refresh_file_list():
-    return [f for f in hf_api.list_repo_files(REPO_ID, repo_type="dataset") if re.match(VALID_PATTERN, f)]
+# --- LOAD FILES WITH PROGRESS ---
+def read_all_data_from_hf_with_progress(file_list, repo_id, token):
+    all_data = []
+    progress = st.progress(0, text="📥 Memuat data dari Hugging Face...")
+    total = len(file_list)
 
-def process_file(file_bytes, filename):
-    df = pd.read_csv(BytesIO(file_bytes), delimiter="|")
-    df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
-    df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
-    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", filename)
-    if date_match:
-        df["upload_date"] = pd.to_datetime(date_match.group(1))
-    return df
-
-def load_all_data():
-    dfs = []
-    for fname in refresh_file_list():
+    for i, file_name in enumerate(file_list):
         try:
-            path = hf_hub_download(REPO_ID, fname, repo_type="dataset", token=HF_TOKEN, local_dir="/tmp")
-            with open(path, "rb") as f:
-                df = process_file(f.read(), fname)
-                dfs.append(df)
-        except Exception as e:
-            print(f"Error loading {fname}: {e}")
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+            match = re.search(r"\d{4}-\d{2}-\d{2}", file_name)
+            upload_date = pd.to_datetime(match.group(0)) if match else None
+            if not upload_date:
+                continue
 
-def upload_and_replace(file):
-    filename = file.name
-    match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", filename)
-    if not match:
-        ui.notify(f"Nama file {filename} tidak valid")
-        return
-    cleaned_name = f"bal_detail_103_{match.group(1)}.csv"
-    existing_files = refresh_file_list()
-    if cleaned_name in existing_files:
-        delete_file(cleaned_name, REPO_ID, repo_type="dataset", token=HF_TOKEN)
-    upload_file(path_or_fileobj=BytesIO(file.content.read()),
+            file_path = hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=file_name,
+                token=token,
+                local_dir="/tmp",
+                local_dir_use_symlinks=False
+            )
+
+            df = pd.read_csv(file_path, delimiter="|")
+            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+            df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
+            df["upload_date"] = upload_date
+            all_data.append(df)
+
+        except Exception as e:
+            st.warning(f"Gagal memproses `{file_name}`: {e}")
+
+        progress.progress((i + 1) / total, text=f"📥 Memuat file {i + 1} dari {total}...")
+
+    progress.empty()
+    return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame(
+        columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
+    )
+
+# --- HF API ---
+hf_api = HfApi(token=HF_TOKEN)
+existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+
+# --- DELETE SECTION ---
+st.sidebar.header("🗑️ Hapus Data")
+delete_file_choice = st.sidebar.selectbox("Pilih file untuk dihapus", [""] + valid_files)
+if st.sidebar.button("🗑️ Hapus File Ini") and delete_file_choice:
+    delete_file(path_in_repo=delete_file_choice, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    st.cache_data.clear()
+    st.sidebar.success(f"File `{delete_file_choice}` berhasil dihapus. Silakan refresh.")
+
+if st.sidebar.button("🔥 Hapus Semua File"):
+    for file in valid_files:
+        delete_file(path_in_repo=file, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    st.cache_data.clear()
+    st.sidebar.success("🚨 Semua file berhasil dihapus dari dataset.")
+
+# --- FILE UPLOADER ---
+st.header("📁 Upload File CSV Harian")
+uploaded_files = st.file_uploader(
+    "Upload satu atau beberapa file CSV (`|` delimiter, format: bal_detail_103_yyyy-mm-dd.csv)", 
+    type=["csv"], 
+    accept_multiple_files=True
+)
+
+# --- HANDLE UPLOADS ---
+if uploaded_files:
+    for file in uploaded_files:
+        original_name = file.name
+        match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", original_name)
+        if not match:
+            st.warning(f"⚠️ Nama file `{original_name}` tidak valid. Dilewati.")
+            continue
+        upload_date = match.group(1)
+        cleaned_name = f"bal_detail_103_{upload_date}.csv"
+
+        try:
+            df = pd.read_csv(file, delimiter="|")
+            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+            df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
+
+            if cleaned_name in existing_files:
+                delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+
+            upload_file(
+                path_or_fileobj=BytesIO(file.getvalue()),
                 path_in_repo=cleaned_name,
                 repo_id=REPO_ID,
                 repo_type="dataset",
-                token=HF_TOKEN)
-    ui.notify(f"✅ File {cleaned_name} berhasil diupload dan disimpan.")
+                token=HF_TOKEN
+            )
+            st.cache_data.clear()
+            st.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
+        except Exception as e:
+            st.error(f"❌ Gagal memproses `{original_name}`: {e}")
 
-# --- UI ---
-ui.label("📊 Ringkasan Piutang Nasabah").classes("text-2xl font-bold")
+# --- LOAD DATA ---
+df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
+if df_all.empty:
+    st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
+    st.stop()
 
-with ui.row():
-    with ui.column():
-        ui.label("📁 Upload File CSV (Format: bal_detail_103_yyyy-mm-dd.csv)")
-        upload = ui.upload(on_upload=upload_and_replace, auto_upload=True, label="Pilih File")
-        upload.tooltip("Format file wajib sesuai dan delimiter '|'")
+# --- SIDEBAR FILTER ---
+st.sidebar.header("🔎 Filter Data")
+salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
+selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
+df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-        def delete_all():
-            for f in refresh_file_list():
-                delete_file(f, REPO_ID, repo_type="dataset", token=HF_TOKEN)
-            ui.notify("🗑️ Semua file berhasil dihapus")
+# --- DATE RANGE FILTER ---
+st.subheader("📅 Pilih Periode Tanggal")
+available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
+default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
+default_end = available_dates[-1]
 
-        ui.button("🔥 Hapus Semua File", on_click=delete_all, color="red")
+selected_range = st.date_input(
+    "Pilih rentang tanggal upload:",
+    value=(default_start, default_end),
+    min_value=available_dates[0],
+    max_value=available_dates[-1]
+)
 
-    with ui.column():
-        def reload():
-            global all_data
-            ui.notify("🔄 Memuat ulang data...")
-            all_data = load_all_data()
-            ui.notify(f"📈 {len(all_data)} baris data dimuat.")
-        ui.button("🔄 Muat Ulang Data", on_click=reload)
+start_date, end_date = selected_range
+df_filtered_range = df_filtered[
+    (df_filtered["upload_date"].dt.date >= start_date) &
+    (df_filtered["upload_date"].dt.date <= end_date)
+]
 
-@ui.page("/")
-def main_page():
-    reload()
-    if all_data.empty:
-        ui.label("⚠️ Tidak ada data yang tersedia.")
-    else:
-        latest_date = all_data["upload_date"].max().date()
-        start_date = datetime(latest_date.year, 1, 1).date()
-        with ui.row():
-            date_range = ui.date_range("Pilih Periode", start_date=start_date, end_date=latest_date)
+# --- CHART ---
+if df_filtered_range.empty:
+    st.warning("❌ Tidak ada data dalam rentang tanggal yang dipilih.")
+else:
+    st.header("📈 Tren Total Piutang per Hari")
+    df_trend = (
+        df_filtered_range.groupby("upload_date", as_index=False)["currentbal"]
+        .sum()
+        .sort_values("upload_date")
+    )
 
-        def update_chart():
-            if not date_range.value:
-                return
-            start, end = date_range.value
-            df_filtered = all_data[(all_data["upload_date"].dt.date >= start) & (all_data["upload_date"].dt.date <= end)]
-            if df_filtered.empty:
-                ui.notify("⚠️ Tidak ada data dalam rentang tanggal yang dipilih.")
-                return
-            df_trend = df_filtered.groupby("upload_date", as_index=False)["currentbal"].sum()
-            ui.line_plot(df_trend, x="upload_date", y="currentbal", title="Tren Piutang", markers=True)
+    fig = px.line(
+        df_trend,
+        x="upload_date",
+        y="currentbal",
+        title=f"Total Piutang — Periode {start_date} s.d. {end_date} {'(SalesID: ' + selected_salesid + ')' if selected_salesid != 'Semua' else ''}",
+        markers=True,
+        labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
+    )
+    fig.update_layout(xaxis_tickformat="%Y-%m-%d")
+    fig.update_traces(hovertemplate="Tanggal: %{x|%Y-%m-%d}<br>Total: Rp %{y:,.0f}")
+    st.plotly_chart(fig, use_container_width=True)
 
-        ui.button("📊 Tampilkan Grafik", on_click=update_chart)
+    # --- DETAIL TANGGAL ---
+    st.subheader("📅 Pilih Tanggal untuk Rincian Data")
+    tanggal_opsi = sorted(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
+    selected_date = st.selectbox("Tanggal Data", tanggal_opsi)
+    df_selected = df_filtered_range[df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
+    st.markdown("---")
 
-# --- FINAL RUN ---
-if __name__ == "__main__":
-    ui.run(title="Ringkasan Piutang", dark=False, reload=False)
+    # --- SUMMARY ---
+    st.header("📊 Ringkasan Data")
+    total_piutang = df_selected["currentbal"].sum()
+    jml_nasabah = df_selected["custcode"].nunique()
+
+    col1, col2 = st.columns(2)
+    col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
+    col2.metric("👥 Jumlah Nasabah", jml_nasabah)
+
+    # --- TABLE ---
+    st.markdown("---")
+    st.subheader(f"📋 Tabel Rincian — Tanggal: {selected_date}")
+    df_view = df_selected.sort_values("currentbal", ascending=False).reset_index(drop=True)
+    df_view["currentbal"] = df_view["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
+    st.dataframe(df_view, use_container_width=True)
