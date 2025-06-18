@@ -105,4 +105,6 @@ def main_page():
 
         ui.button("📊 Tampilkan Grafik", on_click=update_chart)
 
-ui.run(title="Ringkasan Piutang", dark=False)
+# --- FINAL RUN ---
+if __name__ == "__main__":
+    ui.run(title="Ringkasan Piutang", dark=False, reload=False)
