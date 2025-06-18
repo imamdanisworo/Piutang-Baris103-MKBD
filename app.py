@@ -55,7 +55,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# --- HANDLE MULTIPLE FILE UPLOADS WITH CLEAN UI ---
+# --- HANDLE MULTIPLE FILE UPLOADS ---
 if uploaded_files:
     uploaded_success = False
     status_area = st.container()
@@ -110,11 +110,11 @@ if uploaded_files:
         st.cache_data.clear()
         st.success("✅ Semua upload selesai. Memperbarui data...")
 
-        # 🔄 Reload file list and data
+        # 🔄 Refresh file list
         existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
         valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 
-# --- LOAD FILES WITH PROGRESS ---
+# --- LOAD FILES ---
 def read_all_data_from_hf_with_progress(file_list, repo_id, token):
     all_data = []
     progress = st.progress(0, text="📥 Memuat data dari Hugging Face...")
@@ -152,7 +152,6 @@ def read_all_data_from_hf_with_progress(file_list, repo_id, token):
         columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
     )
 
-# --- LOAD DATA ---
 df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
@@ -235,6 +234,34 @@ else:
     col1, col2 = st.columns(2)
     col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
     col2.metric("👥 Jumlah Nasabah", jml_nasabah)
+
+    # --- PIE CHART GROUPING WM SALES ---
+    df_selected_grouped = df_selected.copy()
+    df_selected_grouped["salesid_group"] = df_selected_grouped["salesid"].apply(
+        lambda x: "WM" if str(x).startswith("WM-") else x
+    )
+
+    salesid_summary = (
+        df_selected_grouped.groupby("salesid_group", as_index=False)["currentbal"]
+        .sum()
+        .sort_values("currentbal", ascending=False)
+    )
+
+    if not salesid_summary.empty:
+        fig_salesid_pie = px.pie(
+            salesid_summary,
+            names="salesid_group",
+            values="currentbal",
+            title="📊 Distribusi Piutang per SalesID (Gabung WM-... ke 'WM')",
+            hole=0.4
+        )
+        fig_salesid_pie.update_traces(
+            textinfo="label+percent",
+            hovertemplate="SalesID: %{label}<br>Total: Rp %{value:,.0f}"
+        )
+        st.plotly_chart(fig_salesid_pie, use_container_width=True)
+    else:
+        st.info("Tidak ada data untuk pie chart pada tanggal ini.")
 
     # --- TABLE ---
     st.markdown("---")
