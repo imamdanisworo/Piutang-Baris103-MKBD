@@ -3,3 +3,4 @@ pandas
 huggingface_hub
 fsspec
 plotly
+nicegui
