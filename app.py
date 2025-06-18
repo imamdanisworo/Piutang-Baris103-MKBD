@@ -39,13 +39,14 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
 VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
 
+if HF_TOKEN is None:
+    st.error("❌ HF_TOKEN environment variable is not set.")
+    st.stop()
+
+hf_api = HfApi(token=HF_TOKEN)
+
 st.title("📤 Upload & Analisa Piutang Nasabah")
 st.markdown("---")
-
-# --- HF API ---
-hf_api = HfApi(token=HF_TOKEN)
-existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 
 # --- FILE UPLOADER ---
 st.header("📁 Upload File CSV Harian")
@@ -67,40 +68,27 @@ if uploaded_files:
 
     for idx, file in enumerate(uploaded_files):
         with status_area.status(f"📤 Mengunggah `{file.name}`...", expanded=True) as file_status:
-            original_name = file.name
-            match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", original_name)
+            match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", file.name)
             if not match:
-                file_status.error(f"⚠️ Nama file `{original_name}` tidak valid. Lewati.")
+                file_status.error(f"⚠️ Nama file `{file.name}` tidak valid. Lewati.")
                 continue
-            upload_date = match.group(1)
-            cleaned_name = f"bal_detail_103_{upload_date}.csv"
+
+            cleaned_name = f"bal_detail_103_{match.group(1)}.csv"
 
             try:
                 df = pd.read_csv(file, delimiter="|")
                 df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
                 df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
 
+                existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
                 if cleaned_name in existing_files:
-                    delete_file(
-                        path_in_repo=cleaned_name,
-                        repo_id=REPO_ID,
-                        repo_type="dataset",
-                        token=HF_TOKEN
-                    )
+                    delete_file(cleaned_name, REPO_ID, "dataset", HF_TOKEN)
 
-                upload_file(
-                    path_or_fileobj=BytesIO(file.getvalue()),
-                    path_in_repo=cleaned_name,
-                    repo_id=REPO_ID,
-                    repo_type="dataset",
-                    token=HF_TOKEN
-                )
-
+                upload_file(BytesIO(file.getvalue()), cleaned_name, REPO_ID, "dataset", HF_TOKEN)
                 uploaded_success = True
                 file_status.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
-
             except Exception as e:
-                file_status.error(f"❌ Gagal memproses `{original_name}`: {e}")
+                file_status.error(f"❌ Gagal memproses `{file.name}`: {e}")
 
             overall_progress.progress((idx + 1) / len(uploaded_files), text=f"📁 {idx + 1}/{len(uploaded_files)} file selesai")
 
@@ -111,7 +99,11 @@ if uploaded_files:
         with st.spinner("🔄 Memuat ulang data terbaru..."):
             st.cache_data.clear()
             existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-            valid_files[:] = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+            valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+            df_all = None  # force refresh after upload
+else:
+    existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+    valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 
 # --- LOAD FILES (CACHED) ---
 @st.cache_data(show_spinner="📥 Memuat data dari Hugging Face...")
@@ -138,7 +130,6 @@ def read_all_data_from_hf(file_list, repo_id, token):
             df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
             df["upload_date"] = upload_date
             all_data.append(df)
-
         except Exception:
             pass
 
@@ -151,22 +142,17 @@ if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
 
-# --- DATE RANGE FILTER (CACHED) ---
-@st.cache_data
-def filter_by_date(df, start_date, end_date):
-    return df[(df["upload_date"].dt.date >= start_date) & (df["upload_date"].dt.date <= end_date)]
-
 # --- DELETE SECTION ---
 st.sidebar.header("🗑️ Hapus Data")
 delete_file_choice = st.sidebar.selectbox("Pilih file untuk dihapus", [""] + valid_files)
 if st.sidebar.button("🗑️ Hapus File Ini") and delete_file_choice:
-    delete_file(path_in_repo=delete_file_choice, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    delete_file(delete_file_choice, REPO_ID, "dataset", HF_TOKEN)
     st.cache_data.clear()
     st.sidebar.success(f"File `{delete_file_choice}` berhasil dihapus. Silakan refresh.")
 
 if st.sidebar.button("🔥 Hapus Semua File"):
     for file in valid_files:
-        delete_file(path_in_repo=file, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+        delete_file(file, REPO_ID, "dataset", HF_TOKEN)
     st.cache_data.clear()
     st.sidebar.success("🚨 Semua file berhasil dihapus dari dataset.")
 
@@ -176,9 +162,13 @@ salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-# --- DATE FILTER UI ---
+# --- DATE FILTER ---
 st.subheader("📅 Pilih Periode Tanggal")
 available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
+if not available_dates:
+    st.warning("Tidak ada tanggal tersedia untuk SalesID ini.")
+    st.stop()
+
 default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
 default_end = available_dates[-1]
 
@@ -190,78 +180,49 @@ selected_range = st.date_input(
 )
 
 start_date, end_date = selected_range
-df_filtered_range = filter_by_date(df_filtered, start_date, end_date)
+
+df_filtered_range = df_filtered[
+    (df_filtered["upload_date"].dt.date >= start_date) &
+    (df_filtered["upload_date"].dt.date <= end_date)
+]
 
 # --- CHART ---
 if df_filtered_range.empty:
     st.warning("❌ Tidak ada data dalam rentang tanggal yang dipilih.")
-else:
-    st.header("📈 Tren Total Piutang per Hari")
-    df_trend = (
-        df_filtered_range.groupby("upload_date", as_index=False)["currentbal"]
-        .sum()
-        .sort_values("upload_date")
-    )
+    st.stop()
 
-    fig = px.line(
-        df_trend,
-        x="upload_date",
-        y="currentbal",
-        title=f"Total Piutang — Periode {start_date} s.d. {end_date} {'(SalesID: ' + selected_salesid + ')' if selected_salesid != 'Semua' else ''}",
-        markers=True,
-        labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
-    )
-    fig.update_layout(xaxis_tickformat="%Y-%m-%d")
-    fig.update_traces(hovertemplate="Tanggal: %{x|%Y-%m-%d}<br>Total: Rp %{y:,.0f}")
-    st.plotly_chart(fig, use_container_width=True)
+st.header("📈 Tren Total Piutang per Hari")
+df_trend = df_filtered_range.groupby("upload_date", as_index=False)["currentbal"].sum()
+fig = px.line(df_trend, x="upload_date", y="currentbal", markers=True)
+fig.update_traces(hovertemplate="Tanggal: %{x|%Y-%m-%d}<br>Total: Rp %{y:,.0f}")
+fig.update_layout(title="Total Piutang per Hari", xaxis_title="Tanggal", yaxis_title="Total Piutang")
+st.plotly_chart(fig, use_container_width=True)
 
-    # --- DETAIL TANGGAL ---
-    st.subheader("📅 Pilih Tanggal untuk Rincian Data")
-    tanggal_opsi = sorted(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
-    selected_date = st.selectbox("Tanggal Data", tanggal_opsi)
-    df_selected = df_filtered_range[df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
-    st.markdown("---")
+# --- RINGKASAN PER TANGGAL ---
+st.subheader("📅 Pilih Tanggal untuk Rincian Data")
+tanggal_opsi = sorted(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
+selected_date = st.selectbox("Tanggal Data", tanggal_opsi)
+df_selected = df_filtered_range[df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
 
-    # --- SUMMARY ---
-    st.header("📊 Ringkasan Data")
-    total_piutang = df_selected["currentbal"].sum()
-    jml_nasabah = df_selected["custcode"].nunique()
+st.header("📊 Ringkasan Data")
+total_piutang = df_selected["currentbal"].sum()
+jml_nasabah = df_selected["custcode"].nunique()
+col1, col2 = st.columns(2)
+col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
+col2.metric("👥 Jumlah Nasabah", jml_nasabah)
 
-    col1, col2 = st.columns(2)
-    col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
-    col2.metric("👥 Jumlah Nasabah", jml_nasabah)
+# --- PIE CHART SALESID ---
+df_selected_grouped = df_selected.copy()
+df_selected_grouped["salesid_group"] = df_selected_grouped["salesid"].apply(lambda x: "WM" if str(x).startswith("WM-") else x)
+salesid_summary = df_selected_grouped.groupby("salesid_group", as_index=False)["currentbal"].sum()
 
-    # --- PIE CHART GROUPING WM SALES ---
-    df_selected_grouped = df_selected.copy()
-    df_selected_grouped["salesid_group"] = df_selected_grouped["salesid"].apply(
-        lambda x: "WM" if str(x).startswith("WM-") else x
-    )
+fig2 = px.pie(salesid_summary, names="salesid_group", values="currentbal", hole=0.4)
+fig2.update_traces(textinfo="label+percent", hovertemplate="SalesID: %{label}<br>Total: Rp %{value:,.0f}")
+fig2.update_layout(title="📊 Distribusi Piutang per SalesID")
+st.plotly_chart(fig2, use_container_width=True)
 
-    salesid_summary = (
-        df_selected_grouped.groupby("salesid_group", as_index=False)["currentbal"]
-        .sum()
-        .sort_values("currentbal", ascending=False)
-    )
-
-    if not salesid_summary.empty:
-        fig_salesid_pie = px.pie(
-            salesid_summary,
-            names="salesid_group",
-            values="currentbal",
-            title="📊 Distribusi Piutang per SalesID (Gabung WM-... ke 'WM')",
-            hole=0.4
-        )
-        fig_salesid_pie.update_traces(
-            textinfo="label+percent",
-            hovertemplate="SalesID: %{label}<br>Total: Rp %{value:,.0f}"
-        )
-        st.plotly_chart(fig_salesid_pie, use_container_width=True)
-    else:
-        st.info("Tidak ada data untuk pie chart pada tanggal ini.")
-
-    # --- TABLE ---
-    st.markdown("---")
-    st.subheader(f"📋 Tabel Rincian — Tanggal: {selected_date}")
-    df_view = df_selected.sort_values("currentbal", ascending=False).reset_index(drop=True)
-    df_view["currentbal"] = df_view["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
-    st.dataframe(df_view, use_container_width=True)
+# --- TABEL RINCIAN ---
+st.subheader(f"📋 Tabel Rincian — Tanggal: {selected_date}")
+df_view = df_selected.sort_values("currentbal", ascending=False).reset_index(drop=True)
+df_view["currentbal"] = df_view["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
+st.dataframe(df_view.drop(columns=["salesid_group"]), use_container_width=True)
