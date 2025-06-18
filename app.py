@@ -55,16 +55,24 @@ for file in uploaded_files:
         df["upload_date"] = upload_date
         all_data.append(df)
 
-        # Upload to Hugging Face with overwrite
+        # Prepare content for upload
         content = file.getvalue()
+        content_str = content.decode("utf-8")
+
+        # --- Delete existing file if present
+        existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+        if cleaned_name in existing_files:
+            hf_api.delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset")
+
+        # --- Upload cleaned file
         upload_file(
-            path_or_fileobj=StringIO(content.decode("utf-8")),
+            path_or_fileobj=StringIO(content_str),
             path_in_repo=cleaned_name,
             repo_id=REPO_ID,
             repo_type="dataset",
-            token=HF_TOKEN,
-            overwrite=True
+            token=HF_TOKEN
         )
+
         st.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
     except Exception as e:
         st.error(f"❌ Gagal membaca `{original_name}`: {e}")
@@ -99,7 +107,7 @@ fig = px.line(
     markers=True,
     labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
 )
-fig.update_layout(xaxis_tickformat="%Y-%m-%d")
+fig.update_layout(xaxis_tickformat="%Y-%m-%d")  # ⛔ Remove time format
 fig.update_traces(hovertemplate="Tanggal: %{x}<br>Total: Rp %{y:,.0f}")
 st.plotly_chart(fig, use_container_width=True)
 
