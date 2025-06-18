@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import os
-from huggingface_hub import HfApi, HfFileSystem, RepositoryNotFoundError
+from huggingface_hub import HfApi, HfFileSystem
+from huggingface_hub.utils._errors import RepositoryNotFoundError
 from io import BytesIO
 import plotly.express as px
 
