@@ -99,11 +99,9 @@ st.markdown("---")
 # --- Raw Data Table ---
 st.subheader(f"📋 Tabel Data — Tanggal: {selected_date}")
 
-# Format 'currentbal' with thousand separator (for display)
-df_display = df.copy()
+# Sort numerically, then format
+df_sorted = df.sort_values("currentbal", ascending=False).reset_index(drop=True)
+df_display = df_sorted.copy()
 df_display["currentbal"] = df_display["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
 
-st.dataframe(
-    df_display.sort_values("currentbal", ascending=False).reset_index(drop=True),
-    use_container_width=True
-)
+st.dataframe(df_display, use_container_width=True)
