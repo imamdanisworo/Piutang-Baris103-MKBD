@@ -12,15 +12,12 @@ st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 # --- FULLY REMOVE COLLAPSE BUTTON & LOCK SIDEBAR OPEN ---
 st.markdown("""
     <style>
-    /* ✅ Completely hide the sidebar collapse toggle */
     div[data-testid="collapsedControl"] {
         display: none !important;
         visibility: hidden !important;
         position: absolute !important;
         top: -9999px;
     }
-
-    /* ✅ Force sidebar to stay open and fixed width */
     section[data-testid="stSidebar"] {
         transform: none !important;
         visibility: visible !important;
@@ -30,8 +27,6 @@ st.markdown("""
         position: relative !important;
         left: 0px !important;
     }
-
-    /* ✅ Ensure main content aligns correctly */
     .block-container {
         padding-left: 3rem !important;
         padding-right: 2rem !important;
@@ -114,6 +109,8 @@ uploaded_files = st.file_uploader(
 
 # --- HANDLE UPLOADS ---
 if uploaded_files:
+    uploaded_success = False
+
     for file in uploaded_files:
         original_name = file.name
         match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", original_name)
@@ -123,25 +120,33 @@ if uploaded_files:
         upload_date = match.group(1)
         cleaned_name = f"bal_detail_103_{upload_date}.csv"
 
-        try:
-            df = pd.read_csv(file, delimiter="|")
-            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
-            df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
+        with st.spinner(f"📤 Mengunggah `{original_name}`..."):
+            try:
+                df = pd.read_csv(file, delimiter="|")
+                df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+                df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
 
-            if cleaned_name in existing_files:
-                delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+                if cleaned_name in existing_files:
+                    delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
 
-            upload_file(
-                path_or_fileobj=BytesIO(file.getvalue()),
-                path_in_repo=cleaned_name,
-                repo_id=REPO_ID,
-                repo_type="dataset",
-                token=HF_TOKEN
-            )
-            st.cache_data.clear()
-            st.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
-        except Exception as e:
-            st.error(f"❌ Gagal memproses `{original_name}`: {e}")
+                upload_file(
+                    path_or_fileobj=BytesIO(file.getvalue()),
+                    path_in_repo=cleaned_name,
+                    repo_id=REPO_ID,
+                    repo_type="dataset",
+                    token=HF_TOKEN
+                )
+
+                uploaded_success = True
+                st.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
+            except Exception as e:
+                st.error(f"❌ Gagal memproses `{original_name}`: {e}")
+
+    if uploaded_success:
+        st.cache_data.clear()
+        st.info("🔄 Selesai Upload — Klik tombol di bawah untuk refresh data")
+        if st.button("🔁 Refresh Sekarang"):
+            st.rerun()
 
 # --- LOAD DATA ---
 df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
