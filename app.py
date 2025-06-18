@@ -75,17 +75,19 @@ def read_all_data_from_hf(file_list, repo_id, token):
             df["upload_date"] = upload_date
             all_data.append(df)
 
-        except Exception:
-            pass
+        except Exception as e:
+            st.warning(f"Gagal memproses `{file_name}`: {e}")
+            continue
 
     return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame(
         columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
     )
 
-# --- INITIAL LOAD ---
-existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
-df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
+# --- INITIALIZE SESSION STATE ---
+if "df_all" not in st.session_state:
+    existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+    valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+    st.session_state.df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
 
 # --- FILE UPLOADER ---
 st.header("📁 Upload File CSV Harian")
@@ -95,7 +97,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# --- HANDLE MULTIPLE FILE UPLOADS ---
+# --- HANDLE UPLOADS ---
 if uploaded_files:
     uploaded_success = False
     status_area = st.container()
@@ -104,6 +106,8 @@ if uploaded_files:
     with progress_area:
         st.info("⏳ Sedang memproses file yang diupload...")
         overall_progress = st.progress(0, text="Menyiapkan upload...")
+
+    existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
 
     for idx, file in enumerate(uploaded_files):
         with status_area.status(f"📤 Mengunggah `{file.name}`...", expanded=True) as file_status:
@@ -119,7 +123,6 @@ if uploaded_files:
                 df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
                 df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
 
-                existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
                 if cleaned_name in existing_files:
                     delete_file(cleaned_name, REPO_ID, "dataset", HF_TOKEN)
 
@@ -139,13 +142,13 @@ if uploaded_files:
             st.cache_data.clear()
             existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
             valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
-            df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
+            st.session_state.df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
 
+# --- USE LOADED DATA ---
+df_all = st.session_state.df_all
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
-
-# The rest of your data filtering, chart, and table rendering code should go here...
 
 # --- DATE RANGE FILTER (CACHED) ---
 @st.cache_data
