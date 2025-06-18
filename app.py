@@ -14,13 +14,10 @@ hf_api = HfApi(token=HF_TOKEN)
 
 # --- STATE ---
 all_data = pd.DataFrame()
-existing_files = []
 
 # --- FUNCTIONS ---
 def refresh_file_list():
-    global existing_files
-    existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-    return [f for f in existing_files if re.match(VALID_PATTERN, f)]
+    return [f for f in hf_api.list_repo_files(REPO_ID, repo_type="dataset") if re.match(VALID_PATTERN, f)]
 
 def process_file(file_bytes, filename):
     df = pd.read_csv(BytesIO(file_bytes), delimiter="|")
@@ -32,9 +29,8 @@ def process_file(file_bytes, filename):
     return df
 
 def load_all_data():
-    valid_files = refresh_file_list()
     dfs = []
-    for fname in valid_files:
+    for fname in refresh_file_list():
         try:
             path = hf_hub_download(REPO_ID, fname, repo_type="dataset", token=HF_TOKEN, local_dir="/tmp")
             with open(path, "rb") as f:
@@ -51,6 +47,7 @@ def upload_and_replace(file):
         ui.notify(f"Nama file {filename} tidak valid")
         return
     cleaned_name = f"bal_detail_103_{match.group(1)}.csv"
+    existing_files = refresh_file_list()
     if cleaned_name in existing_files:
         delete_file(cleaned_name, REPO_ID, repo_type="dataset", token=HF_TOKEN)
     upload_file(path_or_fileobj=BytesIO(file.content.read()),
@@ -100,6 +97,9 @@ def main_page():
                 return
             start, end = date_range.value
             df_filtered = all_data[(all_data["upload_date"].dt.date >= start) & (all_data["upload_date"].dt.date <= end)]
+            if df_filtered.empty:
+                ui.notify("⚠️ Tidak ada data dalam rentang tanggal yang dipilih.")
+                return
             df_trend = df_filtered.groupby("upload_date", as_index=False)["currentbal"].sum()
             ui.line_plot(df_trend, x="upload_date", y="currentbal", title="Tren Piutang", markers=True)
 
