@@ -7,7 +7,7 @@ import plotly.express as px
 
 # Config
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
-HF_TOKEN = os.getenv("HF_TOKEN")  # You need to set this in your Hugging Face Space or locally
+HF_TOKEN = os.getenv("HF_TOKEN")  # Set this securely in your environment
 fs = HfFileSystem(token=HF_TOKEN)
 api = HfApi(token=HF_TOKEN)
 
@@ -22,8 +22,9 @@ if uploaded_file is not None:
     filename = uploaded_file.name
     file_content = uploaded_file.read()
 
-    # Save to HF dataset
-    with fs.open(f"{REPO_ID}/data/{filename}", "wb") as f:
+    # Save to Hugging Face dataset
+    remote_path = f"{REPO_ID}/data/{filename}"
+    with fs.open(remote_path, "wb") as f:
         f.write(file_content)
 
     st.success(f"✅ File `{filename}` berhasil diupload ke Hugging Face.")
@@ -34,19 +35,21 @@ st.header("2️⃣ Ringkasan Data")
 
 @st.cache_data
 def load_all_data():
-    file_list = fs.ls(f"{REPO_ID}/data", detail=False)
-    dataframes = []
+    try:
+        file_list = fs.ls(f"{REPO_ID}/data", detail=False)
+    except FileNotFoundError:
+        return pd.DataFrame()  # No folder or data yet
 
+    dataframes = []
     for file_path in file_list:
+        if not file_path.endswith(".csv"):
+            continue
         with fs.open(file_path, "r") as f:
             df = pd.read_csv(f, delimiter="|")
             df["source_file"] = os.path.basename(file_path)
             dataframes.append(df)
 
-    if dataframes:
-        return pd.concat(dataframes, ignore_index=True)
-    else:
-        return pd.DataFrame()
+    return pd.concat(dataframes, ignore_index=True) if dataframes else pd.DataFrame()
 
 df_all = load_all_data()
 
