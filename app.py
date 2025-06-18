@@ -3,18 +3,34 @@ import pandas as pd
 import plotly.express as px
 import re
 import os
-from huggingface_hub import HfApi, upload_file
+from huggingface_hub import HfApi, upload_file, hf_hub_download, delete_file
 from io import BytesIO
 
 # --- CONFIG ---
 HF_TOKEN = os.getenv("HF_TOKEN")
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
-ALLOWED_PATTERN = r"(bal_detail_103_\d{4}-\d{2}-\d{2})"
+VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
 
-# --- PAGE SETUP ---
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 st.title("📤 Upload & Analisa Piutang Nasabah")
 st.markdown("---")
+
+# --- INIT HF API ---
+hf_api = HfApi(token=HF_TOKEN)
+existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+
+# --- DELETE SECTION ---
+st.sidebar.header("🗑️ Hapus Data")
+delete_file_choice = st.sidebar.selectbox("Pilih file untuk dihapus", [""] + valid_files)
+if st.sidebar.button("🗑️ Hapus File Ini") and delete_file_choice:
+    delete_file(path_in_repo=delete_file_choice, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    st.sidebar.success(f"File `{delete_file_choice}` berhasil dihapus. Silakan refresh.")
+
+if st.sidebar.button("🔥 Hapus Semua File"):
+    for file in valid_files:
+        delete_file(path_in_repo=file, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    st.sidebar.success("🚨 Semua file berhasil dihapus dari dataset.")
 
 # --- FILE UPLOADER ---
 st.header("📁 Upload File CSV Harian")
@@ -24,73 +40,75 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-if not uploaded_files:
-    st.info("⬆️ Silakan upload minimal satu file.")
-    st.stop()
-
-# --- Hugging Face API ---
-hf_api = HfApi(token=HF_TOKEN)
-
-# --- LOAD & CLEAN FILES ---
+# --- READ & COMBINE HISTORICAL FILES FROM HF ---
 all_data = []
-for file in uploaded_files:
-    original_name = file.name
-    match = re.search(ALLOWED_PATTERN, original_name)
-    if not match:
-        st.warning(f"⚠️ Nama file `{original_name}` tidak valid. Akan dibersihkan otomatis.")
-        match = re.search(r"\d{4}-\d{2}-\d{2}", original_name)
-        if not match:
-            st.error(f"❌ Gagal memproses `{original_name}`: tidak ditemukan tanggal valid.")
-            continue
-        cleaned_name = f"bal_detail_103_{match.group(0)}.csv"
-    else:
-        cleaned_name = match.group(0) + ".csv"
-
-    upload_date = re.search(r"\d{4}-\d{2}-\d{2}", cleaned_name).group(0)
-
+for file_name in valid_files:
+    match = re.search(r"\d{4}-\d{2}-\d{2}", file_name)
+    upload_date = match.group(0) if match else "Unknown"
     try:
-        df = pd.read_csv(file, delimiter="|")
+        file_path = hf_hub_download(
+            repo_id=REPO_ID,
+            repo_type="dataset",
+            filename=file_name,
+            token=HF_TOKEN,
+            local_dir="/tmp",
+            local_dir_use_symlinks=False
+        )
+        df = pd.read_csv(file_path, delimiter="|")
         df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
         df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
         df["upload_date"] = upload_date
         all_data.append(df)
-
-        # Prepare binary content
-        content = file.getvalue()
-        content_bytes = BytesIO(content)
-
-        # Check if file exists, then delete
-        existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-        if cleaned_name in existing_files:
-            hf_api.delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset")
-
-        # Upload to Hugging Face
-        upload_file(
-            path_or_fileobj=content_bytes,
-            path_in_repo=cleaned_name,
-            repo_id=REPO_ID,
-            repo_type="dataset",
-            token=HF_TOKEN
-        )
-
-        st.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
     except Exception as e:
-        st.error(f"❌ Gagal membaca `{original_name}`: {e}")
+        st.warning(f"Gagal membaca `{file_name}`: {e}")
+
+# --- HANDLE UPLOADED FILES (CLEAN + UPLOAD + APPEND TO DATA) ---
+if uploaded_files:
+    for file in uploaded_files:
+        original_name = file.name
+        match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", original_name)
+        if not match:
+            st.warning(f"⚠️ Nama file `{original_name}` tidak valid. Dilewati.")
+            continue
+        upload_date = match.group(1)
+        cleaned_name = f"bal_detail_103_{upload_date}.csv"
+
+        try:
+            df = pd.read_csv(file, delimiter="|")
+            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+            df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
+            df["upload_date"] = upload_date
+            all_data.append(df)
+
+            # Overwrite if exists
+            if cleaned_name in existing_files:
+                delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+
+            upload_file(
+                path_or_fileobj=BytesIO(file.getvalue()),
+                path_in_repo=cleaned_name,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN
+            )
+            st.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
+        except Exception as e:
+            st.error(f"❌ Gagal memproses `{original_name}`: {e}")
 
 if not all_data:
     st.warning("⚠️ Tidak ada data yang berhasil diproses.")
     st.stop()
 
-# --- GABUNGKAN SEMUA DATA ---
+# --- COMBINE ALL DATA ---
 df_all = pd.concat(all_data, ignore_index=True)
 
-# --- SIDEBAR FILTER ---
+# --- FILTER SIDEBAR ---
 st.sidebar.header("🔎 Filter Data")
 salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-# --- TREN PIUTANG ---
+# --- TREND CHART ---
 st.header("📈 Tren Total Piutang per Hari")
 df_trend = (
     df_filtered.groupby("upload_date")["currentbal"]
@@ -107,7 +125,7 @@ fig = px.line(
     markers=True,
     labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
 )
-fig.update_layout(xaxis_tickformat="%Y-%m-%d")  # ⛔ Remove time format
+fig.update_layout(xaxis_tickformat="%Y-%m-%d")
 fig.update_traces(hovertemplate="Tanggal: %{x}<br>Total: Rp %{y:,.0f}")
 st.plotly_chart(fig, use_container_width=True)
 
@@ -115,7 +133,6 @@ st.plotly_chart(fig, use_container_width=True)
 st.subheader("📅 Pilih Tanggal untuk Rincian Data")
 available_dates = sorted(df_all["upload_date"].unique(), reverse=True)
 selected_date = st.selectbox("Tanggal Data", available_dates)
-
 df_selected = df_all[df_all["upload_date"] == selected_date]
 st.markdown("---")
 
