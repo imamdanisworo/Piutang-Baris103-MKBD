@@ -1,18 +1,30 @@
 import streamlit as st
 import pandas as pd
 import os
-from huggingface_hub import HfApi, HfFileSystem
+from huggingface_hub import HfApi, HfFileSystem, RepositoryNotFoundError
 from io import BytesIO
 import plotly.express as px
 
 # Configuration
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
-HF_TOKEN = os.getenv("HF_TOKEN")  # Must be set in HF Spaces > Secrets
-fs = HfFileSystem(token=HF_TOKEN)
+HF_TOKEN = os.getenv("HF_TOKEN")  # Must be set in HF Spaces → Secrets
 api = HfApi(token=HF_TOKEN)
+fs = HfFileSystem(token=HF_TOKEN)
 
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 st.title("📤 Upload & Analisa Piutang Nasabah")
+
+# --- Ensure dataset exists ---
+try:
+    api.repo_info(repo_id=REPO_ID, repo_type="dataset")
+except RepositoryNotFoundError:
+    api.create_repo(
+        repo_id=REPO_ID,
+        repo_type="dataset",
+        private=True,
+        exist_ok=True
+    )
+    st.info("📁 Dataset baru berhasil dibuat di Hugging Face.")
 
 # --- Upload Section ---
 st.header("1️⃣ Upload CSV Harian")
@@ -23,7 +35,7 @@ if uploaded_file is not None:
     file_bytes = uploaded_file.read()
     remote_path = f"{REPO_ID}/data/{filename}"
 
-    # Ensure the /data folder exists by uploading a dummy file
+    # Ensure the /data folder exists
     try:
         fs.ls(f"{REPO_ID}/data")
     except FileNotFoundError:
