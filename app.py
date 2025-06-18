@@ -9,26 +9,29 @@ from io import BytesIO
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 
-# --- FIX SIDEBAR TO BE ALWAYS VISIBLE ---
+# --- LOCK SIDEBAR ALWAYS VISIBLE (non-collapsible) ---
 st.markdown("""
     <style>
-    /* ❌ Hide collapse (<<) button */
+    /* ❌ Hide the sidebar collapse button */
     [data-testid="collapsedControl"] {
-        display: none;
+        display: none !important;
     }
 
     /* ✅ Force sidebar always visible */
     section[data-testid="stSidebar"] {
+        transform: none !important;
+        visibility: visible !important;
+        width: 270px !important;
         min-width: 270px !important;
         max-width: 270px !important;
-        width: 270px !important;
+        position: relative !important;
+        left: 0px !important;
     }
 
-    /* ✅ Prevent shrinking of main area */
-    section.main > div {
-        max-width: 100% !important;
-        padding-left: 2rem;
-        padding-right: 2rem;
+    /* ✅ Prevent content from shrinking */
+    .block-container {
+        padding-left: 3rem !important;
+        padding-right: 2rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -41,7 +44,7 @@ VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
 st.title("📤 Upload & Analisa Piutang Nasabah")
 st.markdown("---")
 
-# --- LOAD FILES FROM HF WITH PROGRESS ---
+# --- Load Files with Progress ---
 def read_all_data_from_hf_with_progress(file_list, repo_id, token):
     all_data = []
     progress = st.progress(0, text="📥 Memuat data dari Hugging Face...")
@@ -75,18 +78,17 @@ def read_all_data_from_hf_with_progress(file_list, repo_id, token):
         progress.progress((i + 1) / total, text=f"📥 Memuat file {i + 1} dari {total}...")
 
     progress.empty()
-
     if all_data:
         return pd.concat(all_data, ignore_index=True)
     else:
         return pd.DataFrame(columns=["custcode", "custname", "salesid", "currentbal", "upload_date"])
 
-# --- INIT HF API ---
+# --- HF API ---
 hf_api = HfApi(token=HF_TOKEN)
 existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
 valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 
-# --- DELETE SECTION ---
+# --- Sidebar: Delete Section ---
 st.sidebar.header("🗑️ Hapus Data")
 delete_file_choice = st.sidebar.selectbox("Pilih file untuk dihapus", [""] + valid_files)
 if st.sidebar.button("🗑️ Hapus File Ini") and delete_file_choice:
@@ -100,7 +102,7 @@ if st.sidebar.button("🔥 Hapus Semua File"):
     st.cache_data.clear()
     st.sidebar.success("🚨 Semua file berhasil dihapus dari dataset.")
 
-# --- FILE UPLOADER ---
+# --- Upload Section ---
 st.header("📁 Upload File CSV Harian")
 uploaded_files = st.file_uploader(
     "Upload satu atau beberapa file CSV (`|` delimiter, format: bal_detail_103_yyyy-mm-dd.csv)", 
@@ -108,7 +110,6 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# --- HANDLE UPLOADS ---
 if uploaded_files:
     for file in uploaded_files:
         original_name = file.name
@@ -139,19 +140,19 @@ if uploaded_files:
         except Exception as e:
             st.error(f"❌ Gagal memproses `{original_name}`: {e}")
 
-# --- LOAD DATA ---
+# --- Load Data ---
 df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
 
-# --- SIDEBAR FILTER ---
+# --- Sidebar Filter
 st.sidebar.header("🔎 Filter Data")
 salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-# --- DATE FILTER ---
+# --- Tanggal Range
 st.subheader("📅 Pilih Periode Tanggal")
 available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
 default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
@@ -170,7 +171,7 @@ df_filtered_range = df_filtered[
     (df_filtered["upload_date"].dt.date <= end_date)
 ]
 
-# --- TREN PIUTANG ---
+# --- Trend Chart
 if df_filtered_range.empty:
     st.warning("❌ Tidak ada data dalam rentang tanggal yang dipilih.")
 else:
@@ -193,14 +194,13 @@ else:
     fig.update_traces(hovertemplate="Tanggal: %{x|%Y-%m-%d}<br>Total: Rp %{y:,.0f}")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- SELECT TANGGAL DETAIL ---
+    # --- Rincian per Tanggal
     st.subheader("📅 Pilih Tanggal untuk Rincian Data")
     tanggal_opsi = sorted(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
     selected_date = st.selectbox("Tanggal Data", tanggal_opsi)
     df_selected = df_filtered_range[df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
     st.markdown("---")
 
-    # --- RINGKASAN STATISTIK ---
     st.header("📊 Ringkasan Data")
     total_piutang = df_selected["currentbal"].sum()
     jml_nasabah = df_selected["custcode"].nunique()
@@ -209,7 +209,6 @@ else:
     col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
     col2.metric("👥 Jumlah Nasabah", jml_nasabah)
 
-    # --- TABEL DETAIL ---
     st.markdown("---")
     st.subheader(f"📋 Tabel Rincian — Tanggal: {selected_date}")
     df_view = df_selected.sort_values("currentbal", ascending=False).reset_index(drop=True)
