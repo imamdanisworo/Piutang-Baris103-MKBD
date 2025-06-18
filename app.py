@@ -105,9 +105,21 @@ if uploaded_files:
                 buffer.seek(0)
 
                 if cleaned_name in existing_files:
-                    delete_file(cleaned_name, REPO_ID, "dataset", HF_TOKEN)
+                    delete_file(
+                        path_in_repo=cleaned_name,
+                        repo_id=REPO_ID,
+                        repo_type="dataset",
+                        token=HF_TOKEN
+                    )
 
-                upload_file(buffer, cleaned_name, REPO_ID, "dataset", HF_TOKEN)
+                upload_file(
+                    path_or_fileobj=buffer,
+                    path_in_repo=cleaned_name,
+                    repo_id=REPO_ID,
+                    repo_type="dataset",
+                    token=HF_TOKEN
+                )
+
                 uploaded_success = True
                 file_status.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
             except Exception as e:
