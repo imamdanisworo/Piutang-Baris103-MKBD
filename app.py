@@ -36,6 +36,10 @@ st.markdown("""
 
 # --- CONFIG ---
 HF_TOKEN = os.getenv("HF_TOKEN")
+if not HF_TOKEN:
+    st.error("❌ HF_TOKEN environment variable not set.")
+    st.stop()
+
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
 VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
 
@@ -44,74 +48,6 @@ st.markdown("---")
 
 # --- HF API ---
 hf_api = HfApi(token=HF_TOKEN)
-existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
-
-# --- FILE UPLOADER ---
-st.header("📁 Upload File CSV Harian")
-uploaded_files = st.file_uploader(
-    "Upload satu atau beberapa file CSV (`|` delimiter, format: bal_detail_103_yyyy-mm-dd.csv)", 
-    type=["csv"], 
-    accept_multiple_files=True
-)
-
-# --- HANDLE MULTIPLE FILE UPLOADS ---
-if uploaded_files:
-    uploaded_success = False
-    status_area = st.container()
-    progress_area = st.container()
-
-    with progress_area:
-        st.info("⏳ Sedang memproses file yang diupload...")
-        overall_progress = st.progress(0, text="Menyiapkan upload...")
-
-    for idx, file in enumerate(uploaded_files):
-        with status_area.status(f"📤 Mengunggah `{file.name}`...", expanded=True) as file_status:
-            original_name = file.name
-            match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", original_name)
-            if not match:
-                file_status.error(f"⚠️ Nama file `{original_name}` tidak valid. Lewati.")
-                continue
-            upload_date = match.group(1)
-            cleaned_name = f"bal_detail_103_{upload_date}.csv"
-
-            try:
-                df = pd.read_csv(file, delimiter="|")
-                df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
-                df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
-
-                if cleaned_name in existing_files:
-                    delete_file(
-                        path_in_repo=cleaned_name,
-                        repo_id=REPO_ID,
-                        repo_type="dataset",
-                        token=HF_TOKEN
-                    )
-
-                upload_file(
-                    path_or_fileobj=BytesIO(file.getvalue()),
-                    path_in_repo=cleaned_name,
-                    repo_id=REPO_ID,
-                    repo_type="dataset",
-                    token=HF_TOKEN
-                )
-
-                uploaded_success = True
-                file_status.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
-
-            except Exception as e:
-                file_status.error(f"❌ Gagal memproses `{original_name}`: {e}")
-
-            overall_progress.progress((idx + 1) / len(uploaded_files), text=f"📁 {idx + 1}/{len(uploaded_files)} file selesai")
-
-    progress_area.empty()
-
-    if uploaded_success:
-        st.success("✅ Semua file berhasil diupload.")
-        with st.spinner("🔄 Memuat ulang data terbaru..."):
-            st.cache_data.clear()
-            existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-            valid_files[:] = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 
 # --- LOAD FILES (CACHED) ---
 @st.cache_data(show_spinner="📥 Memuat data dari Hugging Face...")
@@ -146,10 +82,70 @@ def read_all_data_from_hf(file_list, repo_id, token):
         columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
     )
 
+# --- INITIAL LOAD ---
+existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
+
+# --- FILE UPLOADER ---
+st.header("📁 Upload File CSV Harian")
+uploaded_files = st.file_uploader(
+    "Upload satu atau beberapa file CSV (`|` delimiter, format: bal_detail_103_yyyy-mm-dd.csv)", 
+    type=["csv"], 
+    accept_multiple_files=True
+)
+
+# --- HANDLE MULTIPLE FILE UPLOADS ---
+if uploaded_files:
+    uploaded_success = False
+    status_area = st.container()
+    progress_area = st.container()
+
+    with progress_area:
+        st.info("⏳ Sedang memproses file yang diupload...")
+        overall_progress = st.progress(0, text="Menyiapkan upload...")
+
+    for idx, file in enumerate(uploaded_files):
+        with status_area.status(f"📤 Mengunggah `{file.name}`...", expanded=True) as file_status:
+            match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", file.name)
+            if not match:
+                file_status.error(f"⚠️ Nama file `{file.name}` tidak valid. Lewati.")
+                continue
+
+            cleaned_name = f"bal_detail_103_{match.group(1)}.csv"
+
+            try:
+                df = pd.read_csv(file, delimiter="|")
+                df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+                df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
+
+                existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+                if cleaned_name in existing_files:
+                    delete_file(cleaned_name, REPO_ID, "dataset", HF_TOKEN)
+
+                upload_file(BytesIO(file.getvalue()), cleaned_name, REPO_ID, "dataset", HF_TOKEN)
+                uploaded_success = True
+                file_status.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
+            except Exception as e:
+                file_status.error(f"❌ Gagal memproses `{file.name}`: {e}")
+
+            overall_progress.progress((idx + 1) / len(uploaded_files), text=f"📁 {idx + 1}/{len(uploaded_files)} file selesai")
+
+    progress_area.empty()
+
+    if uploaded_success:
+        st.success("✅ Semua file berhasil diupload.")
+        with st.spinner("🔄 Memuat ulang data terbaru..."):
+            st.cache_data.clear()
+            existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+            valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+            df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
+
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
+
+# The rest of your data filtering, chart, and table rendering code should go here...
 
 # --- DATE RANGE FILTER (CACHED) ---
 @st.cache_data
