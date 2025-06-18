@@ -101,6 +101,7 @@ if not all_data:
 
 # --- COMBINE ALL DATA ---
 df_all = pd.concat(all_data, ignore_index=True)
+df_all["upload_date"] = pd.to_datetime(df_all["upload_date"])  # prepare for filtering
 
 # --- FILTER SIDEBAR ---
 st.sidebar.header("🔎 Filter Data")
@@ -108,10 +109,28 @@ salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-# --- TREND CHART ---
+# --- DATE RANGE FILTER BEFORE CHART ---
+st.subheader("📅 Pilih Periode Tanggal")
+
+min_date = pd.to_datetime(f"{pd.Timestamp.today().year}-01-01")
+max_date = df_all["upload_date"].max()
+
+selected_range = st.date_input(
+    "Pilih rentang tanggal data",
+    value=(min_date, max_date),
+    min_value=df_all["upload_date"].min(),
+    max_value=max_date
+)
+
+start_date, end_date = pd.to_datetime(selected_range[0]), pd.to_datetime(selected_range[1])
+df_filtered = df_filtered[
+    (df_filtered["upload_date"] >= start_date) & (df_filtered["upload_date"] <= end_date)
+]
+
+# --- TREN PIUTANG ---
 st.header("📈 Tren Total Piutang per Hari")
 df_trend = (
-    df_filtered.groupby("upload_date")["currentbal"]
+    df_filtered.groupby(df_filtered["upload_date"].dt.strftime("%Y-%m-%d"))["currentbal"]
     .sum()
     .reset_index()
     .sort_values("upload_date")
@@ -121,7 +140,7 @@ fig = px.line(
     df_trend,
     x="upload_date",
     y="currentbal",
-    title=f"Total Piutang per Hari{' — SalesID: ' + selected_salesid if selected_salesid != 'Semua' else ''}",
+    title=f"Total Piutang — Periode {start_date.date()} s.d. {end_date.date()} {'(SalesID: ' + selected_salesid + ')' if selected_salesid != 'Semua' else ''}",
     markers=True,
     labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
 )
@@ -129,11 +148,11 @@ fig.update_layout(xaxis_tickformat="%Y-%m-%d")
 fig.update_traces(hovertemplate="Tanggal: %{x}<br>Total: Rp %{y:,.0f}")
 st.plotly_chart(fig, use_container_width=True)
 
-# --- SELECT TANGGAL ---
+# --- SELECT TANGGAL FOR DETAIL VIEW ---
 st.subheader("📅 Pilih Tanggal untuk Rincian Data")
-available_dates = sorted(df_all["upload_date"].unique(), reverse=True)
+available_dates = sorted(df_filtered["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
 selected_date = st.selectbox("Tanggal Data", available_dates)
-df_selected = df_all[df_all["upload_date"] == selected_date]
+df_selected = df_filtered[df_filtered["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
 st.markdown("---")
 
 # --- RINGKASAN STATISTIK ---
