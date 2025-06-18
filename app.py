@@ -9,71 +9,100 @@ from io import BytesIO
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 
-# --- REMOVE COLLAPSE BUTTON & LOCK SIDEBAR ---
+# --- FULLY REMOVE COLLAPSE BUTTON & LOCK SIDEBAR OPEN ---
 st.markdown("""
     <style>
-    div[data-testid="collapsedControl"] { display: none !important; }
-    section[data-testid="stSidebar"] {
-        transform: none !important; visibility: visible !important;
-        width: 270px !important; min-width: 270px !important; max-width: 270px !important;
+    div[data-testid="collapsedControl"] {
+        display: none !important;
+        visibility: hidden !important;
+        position: absolute !important;
+        top: -9999px;
     }
-    .block-container { padding-left: 3rem !important; padding-right: 2rem !important; }
+    section[data-testid="stSidebar"] {
+        transform: none !important;
+        visibility: visible !important;
+        width: 270px !important;
+        min-width: 270px !important;
+        max-width: 270px !important;
+        position: relative !important;
+        left: 0px !important;
+    }
+    .block-container {
+        padding-left: 3rem !important;
+        padding-right: 2rem !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # --- CONFIG ---
 HF_TOKEN = "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"
+
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
 VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
 
 st.title("📤 Upload & Analisa Piutang Nasabah")
 st.markdown("---")
+
+# --- HF API ---
 hf_api = HfApi(token=HF_TOKEN)
 
-# --- LOAD DATA FUNCTION ---
+# --- LOAD FILES (CACHED) ---
 @st.cache_data(show_spinner="📥 Memuat data dari Hugging Face...")
 def read_all_data_from_hf(file_list, repo_id, token):
     all_data = []
     for file_name in file_list:
         try:
-            date_match = re.search(r"\d{4}-\d{2}-\d{2}", file_name)
-            upload_date = pd.to_datetime(date_match.group(0)) if date_match else None
+            match = re.search(r"\d{4}-\d{2}-\d{2}", file_name)
+            upload_date = pd.to_datetime(match.group(0)) if match else None
             if not upload_date:
                 continue
 
             file_path = hf_hub_download(
-                repo_id=repo_id, repo_type="dataset", filename=file_name,
-                token=token, local_dir="/tmp", local_dir_use_symlinks=False
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=file_name,
+                token=token,
+                local_dir="/tmp",
+                local_dir_use_symlinks=False
             )
-            df = pd.read_csv(file_path, delimiter="|", usecols=["custcode", "custname", "salesid", "currentbal"])
-            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0).astype("float32")
+
+            df = pd.read_csv(file_path, delimiter="|")
+            df.columns = df.columns.str.strip().str.lower()
+
+            required_cols = ["custcode", "custname", "salesid", "currentbal"]
+            if not all(col in df.columns for col in required_cols):
+                raise ValueError(f"Kolom wajib tidak lengkap di {file_name}. Ditemukan kolom: {df.columns.tolist()}")
+
+            df = df[required_cols]
+            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
             df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
             df = df[df["currentbal"] != 0]
             df["upload_date"] = upload_date
             all_data.append(df)
 
         except Exception as e:
-            st.warning(f"⚠️ Gagal memproses `{file_name}`: {e}")
+            st.warning(f"Gagal memproses `{file_name}`: {e}")
             continue
 
     return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame(
         columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
     )
 
-# --- INITIAL LOAD ---
+# --- INITIALIZE SESSION STATE ---
 if "df_all" not in st.session_state:
-    all_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-    valid_files = [f for f in all_files if re.match(VALID_PATTERN, f)]
+    existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+    valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
     st.session_state.df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
 
-# --- FILE UPLOAD ---
+# --- FILE UPLOADER ---
 st.header("📁 Upload File CSV Harian")
 uploaded_files = st.file_uploader(
-    "Upload satu atau beberapa file CSV (`|` delimiter, format: bal_detail_103_yyyy-mm-dd.csv)",
-    type=["csv"], accept_multiple_files=True
+    "Upload satu atau beberapa file CSV (`|` delimiter, format: bal_detail_103_yyyy-mm-dd.csv)", 
+    type=["csv"], 
+    accept_multiple_files=True
 )
 
-# --- HANDLE UPLOAD ---
+# --- HANDLE UPLOADS ---
 if uploaded_files:
     uploaded_success = False
     status_area = st.container()
@@ -95,8 +124,15 @@ if uploaded_files:
             cleaned_name = f"bal_detail_103_{match.group(1)}.csv"
 
             try:
-                df = pd.read_csv(file, delimiter="|", usecols=["custcode", "custname", "salesid", "currentbal"])
-                df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0).astype("float32")
+                df = pd.read_csv(file, delimiter="|")
+                df.columns = df.columns.str.strip().str.lower()
+
+                required_cols = ["custcode", "custname", "salesid", "currentbal"]
+                if not all(col in df.columns for col in required_cols):
+                    raise ValueError(f"Kolom wajib tidak lengkap di {file.name}. Ditemukan kolom: {df.columns.tolist()}")
+
+                df = df[required_cols]
+                df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
                 df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
                 df = df[df["currentbal"] != 0]
 
@@ -119,13 +155,12 @@ if uploaded_files:
                     repo_type="dataset",
                     token=HF_TOKEN
                 )
-
                 uploaded_success = True
                 file_status.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
             except Exception as e:
                 file_status.error(f"❌ Gagal memproses `{file.name}`: {e}")
 
-            overall_progress.progress((idx + 1) / len(uploaded_files), text=f"{idx + 1}/{len(uploaded_files)} selesai")
+            overall_progress.progress((idx + 1) / len(uploaded_files), text=f"📁 {idx + 1}/{len(uploaded_files)} file selesai")
 
     progress_area.empty()
 
@@ -133,11 +168,11 @@ if uploaded_files:
         st.success("✅ Semua file berhasil diupload.")
         with st.spinner("🔄 Memuat ulang data terbaru..."):
             st.cache_data.clear()
-            all_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
-            valid_files = [f for f in all_files if re.match(VALID_PATTERN, f)]
+            existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+            valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
             st.session_state.df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
 
-# --- USE DATA ---
+# --- USE LOADED DATA ---
 df_all = st.session_state.df_all
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
