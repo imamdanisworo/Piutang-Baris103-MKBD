@@ -107,44 +107,60 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# --- HANDLE UPLOADS ---
+# --- HANDLE MULTIPLE FILE UPLOADS WITH FRIENDLY UI ---
 if uploaded_files:
+    st.info("⏳ Sedang memproses file yang diupload...")
+
+    status_area = st.container()
+    overall_progress = st.progress(0, text="Menyiapkan upload...")
+
     uploaded_success = False
 
-    for file in uploaded_files:
+    for idx, file in enumerate(uploaded_files):
+        file_status = status_area.status(f"📤 Mengunggah `{file.name}`...", expanded=True)
+
         original_name = file.name
         match = re.search(r"bal_detail_103_(\d{4}-\d{2}-\d{2})", original_name)
         if not match:
-            st.warning(f"⚠️ Nama file `{original_name}` tidak valid. Dilewati.")
+            file_status.error(f"⚠️ Nama file `{original_name}` tidak valid. Lewati.")
             continue
         upload_date = match.group(1)
         cleaned_name = f"bal_detail_103_{upload_date}.csv"
 
-        with st.spinner(f"📤 Mengunggah `{original_name}`..."):
-            try:
-                df = pd.read_csv(file, delimiter="|")
-                df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
-                df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
+        try:
+            df = pd.read_csv(file, delimiter="|")
+            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+            df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
 
-                if cleaned_name in existing_files:
-                    delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
-
-                upload_file(
-                    path_or_fileobj=BytesIO(file.getvalue()),
+            if cleaned_name in existing_files:
+                delete_file(
                     path_in_repo=cleaned_name,
                     repo_id=REPO_ID,
                     repo_type="dataset",
                     token=HF_TOKEN
                 )
 
-                uploaded_success = True
-                st.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
-            except Exception as e:
-                st.error(f"❌ Gagal memproses `{original_name}`: {e}")
+            upload_file(
+                path_or_fileobj=BytesIO(file.getvalue()),
+                path_in_repo=cleaned_name,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN
+            )
+
+            uploaded_success = True
+            file_status.success(f"✅ `{cleaned_name}` berhasil diupload & disimpan.")
+
+        except Exception as e:
+            file_status.error(f"❌ Gagal memproses `{original_name}`: {e}")
+
+        overall_progress.progress((idx + 1) / len(uploaded_files), text=f"📁 {idx + 1}/{len(uploaded_files)} file selesai")
+
+    overall_progress.empty()
 
     if uploaded_success:
         st.cache_data.clear()
-        st.info("🔄 Selesai Upload — Klik tombol di bawah untuk refresh data")
+        st.success("✅ Semua upload selesai. Klik tombol di bawah untuk refresh data.")
         if st.button("🔁 Refresh Sekarang"):
             st.rerun()
 
