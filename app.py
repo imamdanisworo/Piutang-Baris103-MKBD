@@ -47,7 +47,37 @@ if not all_data:
 
 df_all = pd.concat(all_data, ignore_index=True)
 
-# --- Date Selection ---
+# --- Sidebar Filter: salesid selection ---
+salesid_list = sorted(df_all["salesid"].unique())
+selected_salesid = st.sidebar.selectbox("📂 Filter berdasarkan SalesID", ["Semua"] + salesid_list)
+
+if selected_salesid != "Semua":
+    df_all_filtered = df_all[df_all["salesid"] == selected_salesid]
+else:
+    df_all_filtered = df_all
+
+# --- Line Chart: Total Piutang per Date ---
+st.header("📈 Tren Total Piutang per Hari")
+
+df_trend = (
+    df_all_filtered.groupby("upload_date")["currentbal"]
+    .sum()
+    .reset_index()
+    .sort_values("upload_date")
+)
+
+fig_line = px.line(
+    df_trend,
+    x="upload_date",
+    y="currentbal",
+    title=f"Total Piutang per Hari{' — SalesID: ' + selected_salesid if selected_salesid != 'Semua' else ''}",
+    markers=True,
+    labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"},
+)
+fig_line.update_traces(mode="lines+markers", hovertemplate="Tanggal %{x}<br>Rp %{y:,.0f}")
+st.plotly_chart(fig_line, use_container_width=True)
+
+# --- Select Specific Date ---
 available_dates = sorted(df_all["upload_date"].unique(), reverse=True)
 selected_date = st.selectbox("📅 Pilih Tanggal Data", available_dates)
 
@@ -64,35 +94,6 @@ jml_nasabah = df["custcode"].nunique()
 col1, col2 = st.columns(2)
 col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
 col2.metric("👥 Jumlah Nasabah", jml_nasabah)
-
-st.markdown("---")
-
-# --- Sales Summary Chart ---
-st.subheader("📌 Distribusi Kategori Sales")
-sales_summary = df.groupby("salesid")["currentbal"].sum().reset_index()
-fig_sales = px.bar(
-    sales_summary,
-    x="salesid",
-    y="currentbal",
-    title="Total Piutang per Kategori Sales",
-    labels={"salesid": "Kategori", "currentbal": "Nilai Piutang"},
-)
-fig_sales.update_traces(hovertemplate="Rp %{y:,.0f}")
-st.plotly_chart(fig_sales, use_container_width=True)
-
-# --- Top Clients Chart ---
-st.subheader("🏆 Top 10 Nasabah dengan Piutang Tertinggi")
-top_clients = df.nlargest(10, "currentbal")
-fig_top = px.bar(
-    top_clients,
-    x="custname",
-    y="currentbal",
-    title="Top 10 Nasabah",
-    text="currentbal",
-    labels={"custname": "Nasabah", "currentbal": "Piutang"},
-)
-fig_top.update_traces(texttemplate="Rp %{text:,.0f}", hovertemplate="Rp %{y:,.0f}")
-st.plotly_chart(fig_top, use_container_width=True)
 
 st.markdown("---")
 
