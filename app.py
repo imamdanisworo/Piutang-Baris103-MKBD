@@ -109,18 +109,14 @@ if uploaded_files:
     if uploaded_success:
         st.cache_data.clear()
         st.success("✅ Semua upload selesai. Memperbarui data...")
-
-        # 🔄 Refresh file list
         existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
         valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
 
-# --- LOAD FILES ---
-def read_all_data_from_hf_with_progress(file_list, repo_id, token):
+# --- LOAD FILES (CACHED) ---
+@st.cache_data(show_spinner="📥 Memuat data dari Hugging Face...")
+def read_all_data_from_hf(file_list, repo_id, token):
     all_data = []
-    progress = st.progress(0, text="📥 Memuat data dari Hugging Face...")
-    total = len(file_list)
-
-    for i, file_name in enumerate(file_list):
+    for file_name in file_list:
         try:
             match = re.search(r"\d{4}-\d{2}-\d{2}", file_name)
             upload_date = pd.to_datetime(match.group(0)) if match else None
@@ -142,20 +138,22 @@ def read_all_data_from_hf_with_progress(file_list, repo_id, token):
             df["upload_date"] = upload_date
             all_data.append(df)
 
-        except Exception as e:
-            st.warning(f"Gagal memproses `{file_name}`: {e}")
+        except Exception:
+            pass
 
-        progress.progress((i + 1) / total, text=f"📥 Memuat file {i + 1} dari {total}...")
-
-    progress.empty()
     return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame(
         columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
     )
 
-df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
+df_all = read_all_data_from_hf(valid_files, REPO_ID, HF_TOKEN)
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
+
+# --- DATE RANGE FILTER (CACHED) ---
+@st.cache_data
+def filter_by_date(df, start_date, end_date):
+    return df[(df["upload_date"].dt.date >= start_date) & (df["upload_date"].dt.date <= end_date)]
 
 # --- DELETE SECTION ---
 st.sidebar.header("🗑️ Hapus Data")
@@ -177,7 +175,7 @@ salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-# --- DATE RANGE FILTER ---
+# --- DATE FILTER UI ---
 st.subheader("📅 Pilih Periode Tanggal")
 available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
 default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
@@ -191,10 +189,7 @@ selected_range = st.date_input(
 )
 
 start_date, end_date = selected_range
-df_filtered_range = df_filtered[
-    (df_filtered["upload_date"].dt.date >= start_date) &
-    (df_filtered["upload_date"].dt.date <= end_date)
-]
+df_filtered_range = filter_by_date(df_filtered, start_date, end_date)
 
 # --- CHART ---
 if df_filtered_range.empty:
