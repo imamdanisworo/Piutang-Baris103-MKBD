@@ -6,12 +6,28 @@ import os
 from huggingface_hub import HfApi, upload_file, hf_hub_download, delete_file
 from io import BytesIO
 
-# --- CONFIG ---
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
+
+# --- FIX LAYOUT WHEN SIDEBAR IS COLLAPSED ---
+st.markdown("""
+    <style>
+    [data-testid="collapsedControl"] {
+        visibility: visible;
+    }
+    section.main > div {
+        max-width: 100% !important;
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- CONFIG VARIABLES ---
 HF_TOKEN = os.getenv("HF_TOKEN")
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
 VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
 
-st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 st.title("📤 Upload & Analisa Piutang Nasabah")
 st.markdown("---")
 
