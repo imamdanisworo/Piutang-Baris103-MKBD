@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
-from io import StringIO
 
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 st.title("📤 Upload & Analisa Piutang Nasabah")
@@ -99,7 +98,12 @@ st.markdown("---")
 
 # --- Raw Data Table ---
 st.subheader(f"📋 Tabel Data — Tanggal: {selected_date}")
+
+# Format 'currentbal' with thousand separator (for display)
+df_display = df.copy()
+df_display["currentbal"] = df_display["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
+
 st.dataframe(
-    df.sort_values("currentbal", ascending=False).reset_index(drop=True),
+    df_display.sort_values("currentbal", ascending=False).reset_index(drop=True),
     use_container_width=True
 )
