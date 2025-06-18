@@ -4,7 +4,7 @@ import plotly.express as px
 import re
 import os
 from huggingface_hub import HfApi, upload_file
-from io import StringIO
+from io import BytesIO
 
 # --- CONFIG ---
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -55,18 +55,18 @@ for file in uploaded_files:
         df["upload_date"] = upload_date
         all_data.append(df)
 
-        # Prepare content for upload
+        # Prepare binary content
         content = file.getvalue()
-        content_str = content.decode("utf-8")
+        content_bytes = BytesIO(content)
 
-        # --- Delete existing file if present
+        # Check if file exists, then delete
         existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
         if cleaned_name in existing_files:
             hf_api.delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset")
 
-        # --- Upload cleaned file
+        # Upload to Hugging Face
         upload_file(
-            path_or_fileobj=StringIO(content_str),
+            path_or_fileobj=content_bytes,
             path_in_repo=cleaned_name,
             repo_id=REPO_ID,
             repo_type="dataset",
