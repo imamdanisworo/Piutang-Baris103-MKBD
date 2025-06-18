@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import os
 from huggingface_hub import HfApi, HfFileSystem
-from io import StringIO
+from io import BytesIO
 import plotly.express as px
 
 # Configuration
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
-HF_TOKEN = os.getenv("HF_TOKEN")  # Must be set in Hugging Face Secrets
+HF_TOKEN = os.getenv("HF_TOKEN")  # Must be set in HF Spaces > Secrets
 fs = HfFileSystem(token=HF_TOKEN)
 api = HfApi(token=HF_TOKEN)
 
@@ -23,12 +23,12 @@ if uploaded_file is not None:
     file_bytes = uploaded_file.read()
     remote_path = f"{REPO_ID}/data/{filename}"
 
-    # Ensure the /data folder exists
+    # Ensure the /data folder exists by uploading a dummy file
     try:
         fs.ls(f"{REPO_ID}/data")
     except FileNotFoundError:
         api.upload_file(
-            path_or_fileobj=StringIO("init"),
+            path_or_fileobj=BytesIO(b"init"),
             path_in_repo="data/.keep",
             repo_id=REPO_ID,
             repo_type="dataset",
@@ -72,17 +72,24 @@ if df_all.empty:
     st.warning("Belum ada data tersedia.")
     st.stop()
 
-# --- Clean + Summary Stats ---
+# --- Clean + Group Data ---
 df_all["currentbal"] = pd.to_numeric(df_all["currentbal"], errors="coerce").fillna(0)
 
+# 🔁 Group by custcode to remove duplicates and sum balances
+df_all = (
+    df_all.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"]
+    .sum()
+)
+
+# --- Summary Stats ---
 total_piutang = df_all["currentbal"].sum()
 jml_nasabah = df_all["custcode"].nunique()
-jml_hari = df_all["source_file"].nunique()
+jml_file = load_all_data()["source_file"].nunique()
 
 col1, col2, col3 = st.columns(3)
 col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
 col2.metric("👥 Jumlah Nasabah", jml_nasabah)
-col3.metric("📆 Jumlah Hari Data", jml_hari)
+col3.metric("📂 Jumlah File Diupload", jml_file)
 
 # --- Sales Summary Chart ---
 st.subheader("📌 Distribusi Kategori Sales")
@@ -92,7 +99,7 @@ st.plotly_chart(fig_sales, use_container_width=True)
 
 # --- Top Clients Chart ---
 st.subheader("🏆 Top 10 Nasabah dengan Piutang Tertinggi")
-top_clients = df_all.groupby(["custcode", "custname"])["currentbal"].sum().nlargest(10).reset_index()
+top_clients = df_all.nlargest(10, "currentbal")
 fig_top = px.bar(top_clients, x="custname", y="currentbal", title="Top 10 Nasabah", text="currentbal")
 st.plotly_chart(fig_top, use_container_width=True)
 
