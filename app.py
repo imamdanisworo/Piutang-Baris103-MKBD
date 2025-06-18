@@ -6,24 +6,26 @@ import re
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 st.title("📤 Upload & Analisa Piutang Nasabah")
 
-# --- Upload Section ---
-st.header("1️⃣ Upload CSV Harian")
+st.markdown("---")
 
-uploaded_file = st.file_uploader("Upload file CSV (| delimiter)", type=["csv"])
+# --- Upload Section ---
+st.header("📁 Upload File CSV Harian")
+
+uploaded_file = st.file_uploader("Upload file berekstensi `.csv` (dipisah dengan tanda `|`)", type=["csv"])
 if uploaded_file is None:
-    st.warning("Silakan upload file terlebih dahulu.")
+    st.info("⬆️ Silakan upload file terlebih dahulu.")
     st.stop()
 
 # --- Extract date from filename ---
 filename = uploaded_file.name
 match = re.search(r"(\d{4}-\d{2}-\d{2})", filename)
-upload_date = match.group(1) if match else "Unknown"
+upload_date = match.group(1) if match else "Tidak diketahui"
 
 # --- Load and Prepare Data ---
 try:
     df = pd.read_csv(uploaded_file, delimiter="|")
 except Exception as e:
-    st.error(f"Gagal membaca file: {e}")
+    st.error(f"❌ Gagal membaca file: {e}")
     st.stop()
 
 # Convert and clean
@@ -38,13 +40,19 @@ df = (
 # Add upload date column
 df["upload_date"] = upload_date
 
+st.markdown("---")
+
 # --- Summary Stats ---
+st.header("📊 Ringkasan Data")
+
 total_piutang = df["currentbal"].sum()
 jml_nasabah = df["custcode"].nunique()
 
 col1, col2 = st.columns(2)
 col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
 col2.metric("👥 Jumlah Nasabah", jml_nasabah)
+
+st.markdown("---")
 
 # --- Sales Summary Chart ---
 st.subheader("📌 Distribusi Kategori Sales")
@@ -53,8 +61,8 @@ fig_sales = px.bar(
     sales_summary,
     x="salesid",
     y="currentbal",
-    title="Piutang per Kategori Sales",
-    labels={"currentbal": "Rp"},
+    title="Total Piutang per Kategori Sales",
+    labels={"salesid": "Kategori", "currentbal": "Nilai Piutang"},
 )
 fig_sales.update_traces(hovertemplate="Rp %{y:,.0f}")
 st.plotly_chart(fig_sales, use_container_width=True)
@@ -68,13 +76,20 @@ fig_top = px.bar(
     y="currentbal",
     title="Top 10 Nasabah",
     text="currentbal",
-    labels={"currentbal": "Rp"},
+    labels={"custname": "Nasabah", "currentbal": "Piutang"},
 )
 fig_top.update_traces(texttemplate="Rp %{text:,.0f}", hovertemplate="Rp %{y:,.0f}")
 st.plotly_chart(fig_top, use_container_width=True)
 
+st.markdown("---")
+
 # --- Raw Data Preview ---
-st.subheader(f"📋 Tabel Data (Dari File Tanggal: {upload_date})")
-df_display = df.copy()
-df_display["currentbal"] = df_display["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
-st.dataframe(df_display.sort_values("currentbal", ascending=False), use_container_width=True)
+st.subheader(f"📋 Tabel Data (Dari File: `{filename}` — Tanggal: {upload_date})")
+
+# Format display without breaking numeric sorting
+st.dataframe(
+    df.sort_values("currentbal", ascending=False).style.format({
+        "currentbal": "Rp {:,.0f}"
+    }),
+    use_container_width=True
+)
