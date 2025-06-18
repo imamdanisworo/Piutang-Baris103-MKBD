@@ -9,12 +9,22 @@ from io import BytesIO
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 
-# --- FIX LAYOUT WHEN SIDEBAR IS COLLAPSED ---
+# --- FIX SIDEBAR TO BE ALWAYS VISIBLE ---
 st.markdown("""
     <style>
+    /* ❌ Hide collapse (<<) button */
     [data-testid="collapsedControl"] {
-        visibility: visible;
+        display: none;
     }
+
+    /* ✅ Force sidebar always visible */
+    section[data-testid="stSidebar"] {
+        min-width: 270px !important;
+        max-width: 270px !important;
+        width: 270px !important;
+    }
+
+    /* ✅ Prevent shrinking of main area */
     section.main > div {
         max-width: 100% !important;
         padding-left: 2rem;
@@ -23,7 +33,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIG VARIABLES ---
+# --- CONFIG ---
 HF_TOKEN = os.getenv("HF_TOKEN")
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
 VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
@@ -98,7 +108,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# --- HANDLE UPLOADED FILES (CLEAN + UPLOAD) ---
+# --- HANDLE UPLOADS ---
 if uploaded_files:
     for file in uploaded_files:
         original_name = file.name
@@ -129,9 +139,8 @@ if uploaded_files:
         except Exception as e:
             st.error(f"❌ Gagal memproses `{original_name}`: {e}")
 
-# --- LOAD AND FILTER ALL DATA ---
+# --- LOAD DATA ---
 df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
-
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
@@ -142,9 +151,8 @@ salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-# --- DATE RANGE FILTER BEFORE CHART ---
-st.subheader("📅 Pilih Periode Tanggal (berdasarkan tanggal upload)")
-
+# --- DATE FILTER ---
+st.subheader("📅 Pilih Periode Tanggal")
 available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
 default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
 default_end = available_dates[-1]
@@ -185,7 +193,7 @@ else:
     fig.update_traces(hovertemplate="Tanggal: %{x|%Y-%m-%d}<br>Total: Rp %{y:,.0f}")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- SELECT TANGGAL FOR DETAIL VIEW ---
+    # --- SELECT TANGGAL DETAIL ---
     st.subheader("📅 Pilih Tanggal untuk Rincian Data")
     tanggal_opsi = sorted(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
     selected_date = st.selectbox("Tanggal Data", tanggal_opsi)
