@@ -57,7 +57,7 @@ for file_name in valid_files:
         df = pd.read_csv(file_path, delimiter="|")
         df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
         df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
-        df["upload_date"] = upload_date
+        df["upload_date"] = pd.to_datetime(upload_date)
         all_data.append(df)
     except Exception as e:
         st.warning(f"Gagal membaca `{file_name}`: {e}")
@@ -77,7 +77,7 @@ if uploaded_files:
             df = pd.read_csv(file, delimiter="|")
             df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
             df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
-            df["upload_date"] = upload_date
+            df["upload_date"] = pd.to_datetime(upload_date)
             all_data.append(df)
 
             if cleaned_name in existing_files:
@@ -100,23 +100,17 @@ if not all_data:
 
 # --- COMBINE ALL DATA ---
 df_all = pd.concat(all_data, ignore_index=True)
-df_all["upload_date"] = pd.to_datetime(df_all["upload_date"])
 
-# --- FILTER SIDEBAR ---
+# --- SIDEBAR FILTER ---
 st.sidebar.header("🔎 Filter Data")
 salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
 # --- DATE RANGE FILTER BEFORE CHART ---
-st.subheader("📅 Pilih Periode Tanggal (berdasarkan tanggal yang tersedia di data upload)")
+st.subheader("📅 Pilih Periode Tanggal (berdasarkan tanggal upload)")
 
-df_filtered["upload_date"] = pd.to_datetime(df_filtered["upload_date"])
 available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
-if not available_dates:
-    st.warning("Tidak ada tanggal tersedia untuk ditampilkan.")
-    st.stop()
-
 default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
 default_end = available_dates[-1]
 
@@ -139,9 +133,8 @@ if df_filtered_range.empty:
 else:
     st.header("📈 Tren Total Piutang per Hari")
     df_trend = (
-        df_filtered_range.groupby(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d"))["currentbal"]
+        df_filtered_range.groupby("upload_date", as_index=False)["currentbal"]
         .sum()
-        .reset_index()
         .sort_values("upload_date")
     )
 
@@ -154,7 +147,7 @@ else:
         labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
     )
     fig.update_layout(xaxis_tickformat="%Y-%m-%d")
-    fig.update_traces(hovertemplate="Tanggal: %{x}<br>Total: Rp %{y:,.0f}")
+    fig.update_traces(hovertemplate="Tanggal: %{x|%Y-%m-%d}<br>Total: Rp %{y:,.0f}")
     st.plotly_chart(fig, use_container_width=True)
 
     # --- SELECT TANGGAL FOR DETAIL VIEW ---
