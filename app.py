@@ -42,62 +42,10 @@ VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
 st.title("📤 Upload & Analisa Piutang Nasabah")
 st.markdown("---")
 
-# --- LOAD FILES WITH PROGRESS ---
-def read_all_data_from_hf_with_progress(file_list, repo_id, token):
-    all_data = []
-    progress = st.progress(0, text="📥 Memuat data dari Hugging Face...")
-    total = len(file_list)
-
-    for i, file_name in enumerate(file_list):
-        try:
-            match = re.search(r"\d{4}-\d{2}-\d{2}", file_name)
-            upload_date = pd.to_datetime(match.group(0)) if match else None
-            if not upload_date:
-                continue
-
-            file_path = hf_hub_download(
-                repo_id=repo_id,
-                repo_type="dataset",
-                filename=file_name,
-                token=token,
-                local_dir="/tmp",
-                local_dir_use_symlinks=False
-            )
-
-            df = pd.read_csv(file_path, delimiter="|")
-            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
-            df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
-            df["upload_date"] = upload_date
-            all_data.append(df)
-
-        except Exception as e:
-            st.warning(f"Gagal memproses `{file_name}`: {e}")
-
-        progress.progress((i + 1) / total, text=f"📥 Memuat file {i + 1} dari {total}...")
-
-    progress.empty()
-    return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame(
-        columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
-    )
-
 # --- HF API ---
 hf_api = HfApi(token=HF_TOKEN)
 existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
 valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
-
-# --- DELETE SECTION ---
-st.sidebar.header("🗑️ Hapus Data")
-delete_file_choice = st.sidebar.selectbox("Pilih file untuk dihapus", [""] + valid_files)
-if st.sidebar.button("🗑️ Hapus File Ini") and delete_file_choice:
-    delete_file(path_in_repo=delete_file_choice, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
-    st.cache_data.clear()
-    st.sidebar.success(f"File `{delete_file_choice}` berhasil dihapus. Silakan refresh.")
-
-if st.sidebar.button("🔥 Hapus Semua File"):
-    for file in valid_files:
-        delete_file(path_in_repo=file, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
-    st.cache_data.clear()
-    st.sidebar.success("🚨 Semua file berhasil dihapus dari dataset.")
 
 # --- FILE UPLOADER ---
 st.header("📁 Upload File CSV Harian")
@@ -156,17 +104,73 @@ if uploaded_files:
 
             overall_progress.progress((idx + 1) / len(uploaded_files), text=f"📁 {idx + 1}/{len(uploaded_files)} file selesai")
 
-    progress_area.empty()  # ✅ Clean up progress/spinner
+    progress_area.empty()
 
     if uploaded_success:
         st.cache_data.clear()
-        st.success("✅ Semua upload selesai.")
+        st.success("✅ Semua upload selesai. Memperbarui data...")
+
+        # 🔄 Reload file list and data
+        existing_files = hf_api.list_repo_files(REPO_ID, repo_type="dataset")
+        valid_files = [f for f in existing_files if re.match(VALID_PATTERN, f)]
+
+# --- LOAD FILES WITH PROGRESS ---
+def read_all_data_from_hf_with_progress(file_list, repo_id, token):
+    all_data = []
+    progress = st.progress(0, text="📥 Memuat data dari Hugging Face...")
+    total = len(file_list)
+
+    for i, file_name in enumerate(file_list):
+        try:
+            match = re.search(r"\d{4}-\d{2}-\d{2}", file_name)
+            upload_date = pd.to_datetime(match.group(0)) if match else None
+            if not upload_date:
+                continue
+
+            file_path = hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=file_name,
+                token=token,
+                local_dir="/tmp",
+                local_dir_use_symlinks=False
+            )
+
+            df = pd.read_csv(file_path, delimiter="|")
+            df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+            df = df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"].sum()
+            df["upload_date"] = upload_date
+            all_data.append(df)
+
+        except Exception as e:
+            st.warning(f"Gagal memproses `{file_name}`: {e}")
+
+        progress.progress((i + 1) / total, text=f"📥 Memuat file {i + 1} dari {total}...")
+
+    progress.empty()
+    return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame(
+        columns=["custcode", "custname", "salesid", "currentbal", "upload_date"]
+    )
 
 # --- LOAD DATA ---
 df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
+
+# --- DELETE SECTION ---
+st.sidebar.header("🗑️ Hapus Data")
+delete_file_choice = st.sidebar.selectbox("Pilih file untuk dihapus", [""] + valid_files)
+if st.sidebar.button("🗑️ Hapus File Ini") and delete_file_choice:
+    delete_file(path_in_repo=delete_file_choice, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    st.cache_data.clear()
+    st.sidebar.success(f"File `{delete_file_choice}` berhasil dihapus. Silakan refresh.")
+
+if st.sidebar.button("🔥 Hapus Semua File"):
+    for file in valid_files:
+        delete_file(path_in_repo=file, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    st.cache_data.clear()
+    st.sidebar.success("🚨 Semua file berhasil dihapus dari dataset.")
 
 # --- SIDEBAR FILTER ---
 st.sidebar.header("🔎 Filter Data")
