@@ -160,9 +160,7 @@ if uploaded_files:
 
     if uploaded_success:
         st.cache_data.clear()
-        st.success("✅ Semua upload selesai. Klik tombol di bawah untuk refresh data.")
-        if st.button("🔁 Refresh Sekarang"):
-            st.rerun()
+        st.success("✅ Semua upload selesai.")
 
 # --- LOAD DATA ---
 df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
