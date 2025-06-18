@@ -80,7 +80,6 @@ if uploaded_files:
             df["upload_date"] = upload_date
             all_data.append(df)
 
-            # Overwrite if exists
             if cleaned_name in existing_files:
                 delete_file(path_in_repo=cleaned_name, repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
 
@@ -101,7 +100,7 @@ if not all_data:
 
 # --- COMBINE ALL DATA ---
 df_all = pd.concat(all_data, ignore_index=True)
-df_all["upload_date"] = pd.to_datetime(df_all["upload_date"])  # prepare for filtering
+df_all["upload_date"] = pd.to_datetime(df_all["upload_date"])
 
 # --- FILTER SIDEBAR ---
 st.sidebar.header("🔎 Filter Data")
@@ -110,63 +109,73 @@ selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
 # --- DATE RANGE FILTER BEFORE CHART ---
-st.subheader("📅 Pilih Periode Tanggal")
+st.subheader("📅 Pilih Periode Tanggal (berdasarkan tanggal yang tersedia di data upload)")
 
-min_date = pd.to_datetime(f"{pd.Timestamp.today().year}-01-01")
-max_date = df_all["upload_date"].max()
+df_filtered["upload_date"] = pd.to_datetime(df_filtered["upload_date"])
+available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
+if not available_dates:
+    st.warning("Tidak ada tanggal tersedia untuk ditampilkan.")
+    st.stop()
+
+default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
+default_end = available_dates[-1]
 
 selected_range = st.date_input(
-    "Pilih rentang tanggal data",
-    value=(min_date, max_date),
-    min_value=df_all["upload_date"].min(),
-    max_value=max_date
+    "Pilih rentang tanggal upload:",
+    value=(default_start, default_end),
+    min_value=available_dates[0],
+    max_value=available_dates[-1]
 )
 
-start_date, end_date = pd.to_datetime(selected_range[0]), pd.to_datetime(selected_range[1])
-df_filtered = df_filtered[
-    (df_filtered["upload_date"] >= start_date) & (df_filtered["upload_date"] <= end_date)
+start_date, end_date = selected_range
+df_filtered_range = df_filtered[
+    (df_filtered["upload_date"].dt.date >= start_date) &
+    (df_filtered["upload_date"].dt.date <= end_date)
 ]
 
 # --- TREN PIUTANG ---
-st.header("📈 Tren Total Piutang per Hari")
-df_trend = (
-    df_filtered.groupby(df_filtered["upload_date"].dt.strftime("%Y-%m-%d"))["currentbal"]
-    .sum()
-    .reset_index()
-    .sort_values("upload_date")
-)
+if df_filtered_range.empty:
+    st.warning("❌ Tidak ada data dalam rentang tanggal yang dipilih.")
+else:
+    st.header("📈 Tren Total Piutang per Hari")
+    df_trend = (
+        df_filtered_range.groupby(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d"))["currentbal"]
+        .sum()
+        .reset_index()
+        .sort_values("upload_date")
+    )
 
-fig = px.line(
-    df_trend,
-    x="upload_date",
-    y="currentbal",
-    title=f"Total Piutang — Periode {start_date.date()} s.d. {end_date.date()} {'(SalesID: ' + selected_salesid + ')' if selected_salesid != 'Semua' else ''}",
-    markers=True,
-    labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
-)
-fig.update_layout(xaxis_tickformat="%Y-%m-%d")
-fig.update_traces(hovertemplate="Tanggal: %{x}<br>Total: Rp %{y:,.0f}")
-st.plotly_chart(fig, use_container_width=True)
+    fig = px.line(
+        df_trend,
+        x="upload_date",
+        y="currentbal",
+        title=f"Total Piutang — Periode {start_date} s.d. {end_date} {'(SalesID: ' + selected_salesid + ')' if selected_salesid != 'Semua' else ''}",
+        markers=True,
+        labels={"upload_date": "Tanggal", "currentbal": "Total Piutang"}
+    )
+    fig.update_layout(xaxis_tickformat="%Y-%m-%d")
+    fig.update_traces(hovertemplate="Tanggal: %{x}<br>Total: Rp %{y:,.0f}")
+    st.plotly_chart(fig, use_container_width=True)
 
-# --- SELECT TANGGAL FOR DETAIL VIEW ---
-st.subheader("📅 Pilih Tanggal untuk Rincian Data")
-available_dates = sorted(df_filtered["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
-selected_date = st.selectbox("Tanggal Data", available_dates)
-df_selected = df_filtered[df_filtered["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
-st.markdown("---")
+    # --- SELECT TANGGAL FOR DETAIL VIEW ---
+    st.subheader("📅 Pilih Tanggal untuk Rincian Data")
+    tanggal_opsi = sorted(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
+    selected_date = st.selectbox("Tanggal Data", tanggal_opsi)
+    df_selected = df_filtered_range[df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
+    st.markdown("---")
 
-# --- RINGKASAN STATISTIK ---
-st.header("📊 Ringkasan Data")
-total_piutang = df_selected["currentbal"].sum()
-jml_nasabah = df_selected["custcode"].nunique()
+    # --- RINGKASAN STATISTIK ---
+    st.header("📊 Ringkasan Data")
+    total_piutang = df_selected["currentbal"].sum()
+    jml_nasabah = df_selected["custcode"].nunique()
 
-col1, col2 = st.columns(2)
-col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
-col2.metric("👥 Jumlah Nasabah", jml_nasabah)
+    col1, col2 = st.columns(2)
+    col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
+    col2.metric("👥 Jumlah Nasabah", jml_nasabah)
 
-# --- TABEL DETAIL ---
-st.markdown("---")
-st.subheader(f"📋 Tabel Rincian — Tanggal: {selected_date}")
-df_view = df_selected.sort_values("currentbal", ascending=False).reset_index(drop=True)
-df_view["currentbal"] = df_view["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
-st.dataframe(df_view, use_container_width=True)
+    # --- TABEL DETAIL ---
+    st.markdown("---")
+    st.subheader(f"📋 Tabel Rincian — Tanggal: {selected_date}")
+    df_view = df_selected.sort_values("currentbal", ascending=False).reset_index(drop=True)
+    df_view["currentbal"] = df_view["currentbal"].apply(lambda x: f"Rp {x:,.0f}")
+    st.dataframe(df_view, use_container_width=True)
