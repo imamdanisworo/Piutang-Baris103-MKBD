@@ -2,43 +2,57 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
+from io import StringIO
 
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 st.title("📤 Upload & Analisa Piutang Nasabah")
 
 st.markdown("---")
 
-# --- Upload Section ---
+# --- Upload Multiple Files ---
 st.header("📁 Upload File CSV Harian")
-
-uploaded_file = st.file_uploader("Upload file berekstensi `.csv` (dipisah dengan tanda `|`)", type=["csv"])
-if uploaded_file is None:
-    st.info("⬆️ Silakan upload file terlebih dahulu.")
-    st.stop()
-
-# --- Extract date from filename ---
-filename = uploaded_file.name
-match = re.search(r"(\d{4}-\d{2}-\d{2})", filename)
-upload_date = match.group(1) if match else "Tidak diketahui"
-
-# --- Load and Prepare Data ---
-try:
-    df = pd.read_csv(uploaded_file, delimiter="|")
-except Exception as e:
-    st.error(f"❌ Gagal membaca file: {e}")
-    st.stop()
-
-# Convert and clean
-df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
-
-# Group by custcode to sum duplicates
-df = (
-    df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"]
-    .sum()
+uploaded_files = st.file_uploader(
+    "Upload satu atau beberapa file CSV (| delimiter)", 
+    type=["csv"], 
+    accept_multiple_files=True
 )
 
-# Add upload date column
-df["upload_date"] = upload_date
+if not uploaded_files:
+    st.info("⬆️ Silakan upload minimal satu file.")
+    st.stop()
+
+# --- Load and Combine All Uploaded Data ---
+all_data = []
+
+for file in uploaded_files:
+    # Extract date from filename
+    filename = file.name
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", filename)
+    upload_date = match.group(1) if match else "Unknown"
+
+    try:
+        df = pd.read_csv(file, delimiter="|")
+        df["currentbal"] = pd.to_numeric(df["currentbal"], errors="coerce").fillna(0)
+        df = (
+            df.groupby(["custcode", "custname", "salesid"], as_index=False)["currentbal"]
+            .sum()
+        )
+        df["upload_date"] = upload_date
+        all_data.append(df)
+    except Exception as e:
+        st.error(f"Gagal membaca file `{filename}`: {e}")
+
+if not all_data:
+    st.warning("Tidak ada data yang berhasil diproses.")
+    st.stop()
+
+df_all = pd.concat(all_data, ignore_index=True)
+
+# --- Date Selection ---
+available_dates = sorted(df_all["upload_date"].unique(), reverse=True)
+selected_date = st.selectbox("📅 Pilih Tanggal Data", available_dates)
+
+df = df_all[df_all["upload_date"] == selected_date]
 
 st.markdown("---")
 
@@ -83,13 +97,9 @@ st.plotly_chart(fig_top, use_container_width=True)
 
 st.markdown("---")
 
-# --- Raw Data Preview ---
-st.subheader(f"📋 Tabel Data (Dari File: `{filename}` — Tanggal: {upload_date})")
-
-# Format display without breaking numeric sorting
+# --- Raw Data Table ---
+st.subheader(f"📋 Tabel Data — Tanggal: {selected_date}")
 st.dataframe(
-    df.sort_values("currentbal", ascending=False).style.format({
-        "currentbal": "Rp {:,.0f}"
-    }),
+    df.sort_values("currentbal", ascending=False).reset_index(drop=True),
     use_container_width=True
 )
