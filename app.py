@@ -9,20 +9,18 @@ from io import BytesIO
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="📊 Ringkasan Piutang", layout="wide")
 
-# --- FINAL SIDEBAR LOCKDOWN ---
+# --- FULLY REMOVE COLLAPSE BUTTON & LOCK SIDEBAR OPEN ---
 st.markdown("""
     <style>
-    /* ❌ Hide collapse button (<<) */
-    [data-testid="collapsedControl"] {
+    /* ✅ Completely hide the sidebar collapse toggle */
+    div[data-testid="collapsedControl"] {
         display: none !important;
+        visibility: hidden !important;
+        position: absolute !important;
+        top: -9999px;
     }
 
-    /* ❌ Hide parent container that holds the << >> group */
-    div[data-testid="stSidebar"] > div:first-child {
-        display: none !important;
-    }
-
-    /* ✅ Force sidebar always visible and fixed width */
+    /* ✅ Force sidebar to stay open and fixed width */
     section[data-testid="stSidebar"] {
         transform: none !important;
         visibility: visible !important;
@@ -33,7 +31,7 @@ st.markdown("""
         left: 0px !important;
     }
 
-    /* ✅ Adjust main content layout */
+    /* ✅ Ensure main content aligns correctly */
     .block-container {
         padding-left: 3rem !important;
         padding-right: 2rem !important;
@@ -114,6 +112,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
+# --- HANDLE UPLOADS ---
 if uploaded_files:
     for file in uploaded_files:
         original_name = file.name
@@ -144,19 +143,19 @@ if uploaded_files:
         except Exception as e:
             st.error(f"❌ Gagal memproses `{original_name}`: {e}")
 
-# --- LOAD AND COMBINE ---
+# --- LOAD DATA ---
 df_all = read_all_data_from_hf_with_progress(valid_files, REPO_ID, HF_TOKEN)
 if df_all.empty:
     st.warning("⚠️ Tidak ada data yang berhasil dimuat.")
     st.stop()
 
-# --- FILTER SIDEBAR ---
+# --- SIDEBAR FILTER ---
 st.sidebar.header("🔎 Filter Data")
 salesid_list = ["Semua"] + sorted(df_all["salesid"].unique())
 selected_salesid = st.sidebar.selectbox("Pilih SalesID", salesid_list)
 df_filtered = df_all if selected_salesid == "Semua" else df_all[df_all["salesid"] == selected_salesid]
 
-# --- FILTER BY DATE RANGE ---
+# --- DATE RANGE FILTER ---
 st.subheader("📅 Pilih Periode Tanggal")
 available_dates = sorted(df_filtered["upload_date"].dt.date.unique())
 default_start = max(pd.to_datetime(f"{pd.Timestamp.today().year}-01-01").date(), available_dates[0])
@@ -198,14 +197,14 @@ else:
     fig.update_traces(hovertemplate="Tanggal: %{x|%Y-%m-%d}<br>Total: Rp %{y:,.0f}")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- PILIH TANGGAL ---
+    # --- DETAIL TANGGAL ---
     st.subheader("📅 Pilih Tanggal untuk Rincian Data")
     tanggal_opsi = sorted(df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d").unique(), reverse=True)
     selected_date = st.selectbox("Tanggal Data", tanggal_opsi)
     df_selected = df_filtered_range[df_filtered_range["upload_date"].dt.strftime("%Y-%m-%d") == selected_date]
     st.markdown("---")
 
-    # --- RINGKASAN ---
+    # --- SUMMARY ---
     st.header("📊 Ringkasan Data")
     total_piutang = df_selected["currentbal"].sum()
     jml_nasabah = df_selected["custcode"].nunique()
@@ -214,7 +213,7 @@ else:
     col1.metric("💰 Total Piutang", f"Rp {total_piutang:,.0f}")
     col2.metric("👥 Jumlah Nasabah", jml_nasabah)
 
-    # --- TABEL ---
+    # --- TABLE ---
     st.markdown("---")
     st.subheader(f"📋 Tabel Rincian — Tanggal: {selected_date}")
     df_view = df_selected.sort_values("currentbal", ascending=False).reset_index(drop=True)
