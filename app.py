@@ -35,7 +35,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- CONFIG ---
-HF_TOKEN = os.getenv("HF_TOKEN")
+HF_TOKEN = "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"
+
 if not HF_TOKEN:
     st.error("❌ HF_TOKEN environment variable not set.")
     st.stop()
