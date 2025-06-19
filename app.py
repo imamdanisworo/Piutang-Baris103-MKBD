@@ -35,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- CONFIG ---
-HF_TOKEN = "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"
+HF_TOKEN = 'HF Token'
 
 REPO_ID = "imamdanisworo/Piutang-Baris103-MKBD"
 VALID_PATTERN = r"bal_detail_103_\d{4}-\d{2}-\d{2}\.csv"
